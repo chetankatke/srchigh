@@ -649,8 +649,10 @@ The binary bundles Python, all pip dependencies, and the application code into a
 5. **TLS fingerprinting** — Chrome 120+ headers (`Sec-Ch-Ua`, `Sec-Fetch-*`)
 6. **Optional Scrapling** — Even better stealth if `scrapling` is installed
 
----
+## Disclaimer
+
+This software is for educational and research/academic purposes only. Please read the full [DISCLAIMER](DISCLAIMER.md) before using this tool.
 
 ## License
 
-MIT
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
