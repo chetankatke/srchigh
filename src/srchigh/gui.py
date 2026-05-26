@@ -199,28 +199,8 @@ class GuiApp:
         self.ctrl.on_image = self.display_captcha
         
         self.tk_img = None
-        self.setup_styles()
         self.create_widgets()
         
-    def setup_styles(self):
-        style = ttk.Style()
-        style.theme_use("clam")
-        
-        # Dark themes
-        style.configure(".", background="#1e1e1e", foreground="#f0f0f0")
-        style.configure("TLabel", background="#1e1e1e", foreground="#f0f0f0", font=("Helvetica", 10))
-        style.configure("Header.TLabel", font=("Helvetica", 14, "bold"), foreground="#00adb5")
-        style.configure("TEntry", fieldbackground="#333333", foreground="#f0f0f0", insertcolor="#f0f0f0")
-        style.configure("TCombobox", fieldbackground="#333333", background="#1e1e1e", foreground="#f0f0f0")
-        
-        # Primary Action Button
-        style.configure("Action.TButton", background="#00adb5", foreground="#ffffff", font=("Helvetica", 10, "bold"))
-        style.map("Action.TButton", background=[("active", "#008080")])
-        
-        # Normal Button
-        style.configure("Browse.TButton", background="#444444", foreground="#ffffff")
-        style.map("Browse.TButton", background=[("active", "#555555")])
-
     def create_widgets(self):
         self.root.columnconfigure(0, weight=1, minsize=320)
         self.root.columnconfigure(1, weight=2)
@@ -237,49 +217,53 @@ class GuiApp:
         right_frame.rowconfigure(1, weight=1)
         
         # App Title
-        title_label = ttk.Label(left_frame, text="srchigh Scraper GUI", style="Header.TLabel")
+        title_label = tk.Label(left_frame, text="srchigh Scraper GUI", bg="#252526", fg="#00adb5", font=("Helvetica", 14, "bold"))
         title_label.grid(row=0, column=0, columnspan=2, pady=(0, 20), sticky="w")
         
         # Search Term Field
-        ttk.Label(left_frame, text="Search Term:").grid(row=1, column=0, sticky="w", pady=5)
-        self.search_entry = ttk.Entry(left_frame, width=28)
+        tk.Label(left_frame, text="Search Term:", bg="#252526", fg="#f0f0f0", font=("Helvetica", 10)).grid(row=1, column=0, sticky="w", pady=5)
+        self.search_entry = tk.Entry(left_frame, width=28, bg="#333333", fg="#f0f0f0", insertbackground="#f0f0f0", bd=1, relief="solid")
         self.search_entry.grid(row=2, column=0, columnspan=2, sticky="w", pady=2)
         
         # High Court Dropdown
-        ttk.Label(left_frame, text="Filter High Court:").grid(row=3, column=0, sticky="w", pady=5)
+        tk.Label(left_frame, text="Filter High Court:", bg="#252526", fg="#f0f0f0", font=("Helvetica", 10)).grid(row=3, column=0, sticky="w", pady=5)
         courts = [""] + sorted(list(COURT_NAMES.keys()))
-        self.court_combo = ttk.Combobox(left_frame, values=courts, width=26, state="readonly")
-        self.court_combo.grid(row=4, column=0, columnspan=2, sticky="w", pady=2)
+        self.court_var = tk.StringVar(self.root)
+        self.court_var.set("")
+        self.court_menu = tk.OptionMenu(left_frame, self.court_var, *courts)
+        self.court_menu.configure(bg="#333333", fg="#f0f0f0", highlightbackground="#252526", activebackground="#444444", activeforeground="#f0f0f0", width=22)
+        self.court_menu.grid(row=4, column=0, columnspan=2, sticky="w", pady=2)
         
         # Download Count
-        ttk.Label(left_frame, text="Max Results count:").grid(row=5, column=0, sticky="w", pady=5)
+        tk.Label(left_frame, text="Max Results count:", bg="#252526", fg="#f0f0f0", font=("Helvetica", 10)).grid(row=5, column=0, sticky="w", pady=5)
         self.count_spin = tk.Spinbox(left_frame, from_=1, to=200, width=10, bg="#333333", fg="#f0f0f0", buttonbackground="#252526", insertbackground="#f0f0f0")
         self.count_spin.delete(0, "end")
         self.count_spin.insert(0, "5")
         self.count_spin.grid(row=6, column=0, sticky="w", pady=2)
         
         # Date Bounds
-        ttk.Label(left_frame, text="Dates Bounds (DD-MM-YYYY):").grid(row=7, column=0, columnspan=2, sticky="w", pady=(15, 5))
+        tk.Label(left_frame, text="Dates Bounds (DD-MM-YYYY):", bg="#252526", fg="#f0f0f0", font=("Helvetica", 10, "bold")).grid(row=7, column=0, columnspan=2, sticky="w", pady=(15, 5))
         
-        ttk.Label(left_frame, text="From Date:", font=("Helvetica", 9)).grid(row=8, column=0, sticky="w")
-        self.from_entry = ttk.Entry(left_frame, width=12)
+        tk.Label(left_frame, text="From Date:", bg="#252526", fg="#f0f0f0", font=("Helvetica", 9)).grid(row=8, column=0, sticky="w")
+        self.from_entry = tk.Entry(left_frame, width=12, bg="#333333", fg="#f0f0f0", insertbackground="#f0f0f0", bd=1, relief="solid")
         self.from_entry.grid(row=9, column=0, sticky="w", pady=2)
         
-        ttk.Label(left_frame, text="To Date:", font=("Helvetica", 9)).grid(row=8, column=1, sticky="w")
-        self.to_entry = ttk.Entry(left_frame, width=12)
+        tk.Label(left_frame, text="To Date:", bg="#252526", fg="#f0f0f0", font=("Helvetica", 9)).grid(row=8, column=1, sticky="w")
+        self.to_entry = tk.Entry(left_frame, width=12, bg="#333333", fg="#f0f0f0", insertbackground="#f0f0f0", bd=1, relief="solid")
         self.to_entry.grid(row=9, column=1, sticky="w", pady=2)
         
         # Download Output Directory
-        ttk.Label(left_frame, text="Output Directory:").grid(row=10, column=0, columnspan=2, sticky="w", pady=(20, 5))
-        self.dir_entry = ttk.Entry(left_frame, width=20)
+        tk.Label(left_frame, text="Output Directory:", bg="#252526", fg="#f0f0f0", font=("Helvetica", 10)).grid(row=10, column=0, columnspan=2, sticky="w", pady=(20, 5))
+        self.dir_entry = tk.Entry(left_frame, width=20, bg="#333333", fg="#f0f0f0", insertbackground="#f0f0f0", bd=1, relief="solid")
         self.dir_entry.insert(0, self.ctrl.output_dir)
         self.dir_entry.grid(row=11, column=0, sticky="w", pady=2)
         
-        self.browse_btn = ttk.Button(left_frame, text="Browse", style="Browse.TButton", command=self.browse_directory, width=8)
+        # Browse Button
+        self.browse_btn = tk.Button(left_frame, text="Browse", bg="#444444", fg="#ffffff", highlightbackground="#252526", activebackground="#555555", activeforeground="#ffffff", command=self.browse_directory, width=8)
         self.browse_btn.grid(row=11, column=1, sticky="w", padx=(5, 0), pady=2)
         
         # Trigger button
-        self.run_btn = ttk.Button(left_frame, text="Start Scraper", style="Action.TButton", command=self.start_scrape)
+        self.run_btn = tk.Button(left_frame, text="Start Scraper", bg="#00adb5", fg="#ffffff", highlightbackground="#252526", activebackground="#008080", activeforeground="#ffffff", font=("Helvetica", 10, "bold"), command=self.start_scrape)
         self.run_btn.grid(row=12, column=0, columnspan=2, pady=(35, 0), sticky="ew")
 
         # Captcha Display Frame
@@ -295,10 +279,10 @@ class GuiApp:
         log_frame.rowconfigure(0, weight=1)
         log_frame.columnconfigure(0, weight=1)
         
-        self.log_text = tk.Text(log_frame, bg="#0d0d0d", fg="#a6e22e", insertbackground="#f8f8f2", font=("Courier New", 10), state="disabled", wrap="word")
+        self.log_text = tk.Text(log_frame, bg="#0d0d0d", fg="#a6e22e", insertbackground="#f8f8f2", font=("Courier New", 10), state="disabled", wrap="word", bd=0)
         self.log_text.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
         
-        scrollbar = ttk.Scrollbar(log_frame, command=self.log_text.yview)
+        scrollbar = tk.Scrollbar(log_frame, command=self.log_text.yview, bg="#1e1e1e", highlightbackground="#1e1e1e")
         scrollbar.grid(row=0, column=1, sticky="ns", padx=(0, 5), pady=5)
         self.log_text.configure(yscrollcommand=scrollbar.set)
         
@@ -339,7 +323,7 @@ class GuiApp:
             return
             
         self.ctrl.search_term = self.search_entry.get()
-        self.ctrl.court = self.court_combo.get()
+        self.ctrl.court = self.court_var.get()
         self.ctrl.from_date = self.from_entry.get()
         self.ctrl.to_date = self.to_entry.get()
         self.ctrl.output_dir = self.dir_entry.get()
@@ -357,7 +341,7 @@ class GuiApp:
         
         self.run_btn.configure(state="disabled", text="Running...")
         self.search_entry.configure(state="disabled")
-        self.court_combo.configure(state="disabled")
+        self.court_menu.configure(state="disabled")
         self.from_entry.configure(state="disabled")
         self.to_entry.configure(state="disabled")
         self.browse_btn.configure(state="disabled")
@@ -370,7 +354,7 @@ class GuiApp:
         def reset_ui():
             self.run_btn.configure(state="normal", text="Start Scraper")
             self.search_entry.configure(state="normal")
-            self.court_combo.configure(state="normal")
+            self.court_menu.configure(state="normal")
             self.from_entry.configure(state="normal")
             self.to_entry.configure(state="normal")
             self.browse_btn.configure(state="normal")
