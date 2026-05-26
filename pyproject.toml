@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "srchigh"
+version = "2.0.0"
+description = "eCourts India — High Court Judgments Scraper"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.9"
+dependencies = [
+    "requests>=2.31.0",
+    "Pillow>=10.0.0",
+    "pytesseract>=0.3.10",
+    "parsel>=1.10.0",
+    "cssselect>=1.3.0",
+]
+
+[project.scripts]
+srchigh = "srchigh.main:run_cli"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["srchigh*"]
