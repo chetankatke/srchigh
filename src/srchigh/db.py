@@ -1,0 +1,255 @@
+"""
+Database layer — SQLite with aiosqlite for async operations.
+Stores judgment records persistently instead of CSV.
+"""
+
+import aiosqlite
+import os
+import json
+from datetime import datetime
+
+DB_PATH = os.path.join(os.path.expanduser("~"), ".config", "srchigh", "judgments.db")
+
+CREATE_TABLE = """
+CREATE TABLE IF NOT EXISTS judgments (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    cnr             TEXT,
+    case_title      TEXT,
+    court           TEXT,
+    judge           TEXT,
+    reg_date        TEXT,
+    decision_date   TEXT,
+    disposal_nature TEXT,
+    pdf_path        TEXT,
+    search_term     TEXT,
+    downloaded      INTEGER DEFAULT 0,
+    file_size       INTEGER DEFAULT 0,
+    created_at      TEXT,
+    UNIQUE(cnr, search_term)
+)
+"""
+
+CREATE_SEARCHES = """
+CREATE TABLE IF NOT EXISTS searches (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    search_term     TEXT UNIQUE,
+    mode            TEXT,
+    court           TEXT,
+    total_results   INTEGER DEFAULT 0,
+    pages_fetched   INTEGER DEFAULT 0,
+    created_at      TEXT
+)
+"""
+
+CREATE_DOWNLOADS_LOG = """
+CREATE TABLE IF NOT EXISTS download_log (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    cnr             TEXT,
+    pdf_path        TEXT,
+    search_term     TEXT,
+    downloaded_at   TEXT,
+    success         INTEGER,
+    file_size       INTEGER,
+    session_cnr     TEXT
+)
+"""
+
+
+async def init_db():
+    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.executescript(CREATE_TABLE)
+        await db.executescript(CREATE_SEARCHES)
+        await db.executescript(CREATE_DOWNLOADS_LOG)
+        await db.commit()
+
+
+async def insert_judgment(entry, search_term="", downloaded=False, file_size=0):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("""
+            INSERT OR REPLACE INTO judgments
+            (cnr, case_title, court, judge, reg_date, decision_date,
+             disposal_nature, pdf_path, search_term, downloaded, file_size, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            entry.get("cnr"),
+            entry.get("case_title"),
+            entry.get("court"),
+            entry.get("judge"),
+            entry.get("reg_date"),
+            entry.get("decision_date"),
+            entry.get("disposal_nature"),
+            entry.get("path"),
+            search_term,
+            1 if downloaded else 0,
+            file_size,
+            datetime.utcnow().isoformat(),
+        ))
+        await db.commit()
+
+
+async def insert_judgments_batch(entries, search_term=""):
+    if not entries:
+        return
+    rows = [
+        (
+            e.get("cnr"),
+            e.get("case_title"),
+            e.get("court"),
+            e.get("judge"),
+            e.get("reg_date"),
+            e.get("decision_date"),
+            e.get("disposal_nature"),
+            e.get("path"),
+            search_term,
+            0,
+            0,
+            datetime.utcnow().isoformat(),
+        )
+        for e in entries
+    ]
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.executemany("""
+            INSERT OR IGNORE INTO judgments
+            (cnr, case_title, court, judge, reg_date, decision_date,
+             disposal_nature, pdf_path, search_term, downloaded, file_size, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, rows)
+        await db.commit()
+
+
+async def mark_downloaded(cnr, file_size, search_term=""):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("""
+            UPDATE judgments SET downloaded = 1, file_size = ?
+            WHERE cnr = ? AND (search_term = ? OR ? = '')
+        """, (file_size, cnr, search_term, search_term))
+        await db.commit()
+
+
+async def get_undownloaded(search_term="", limit=100):
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("""
+            SELECT * FROM judgments
+            WHERE downloaded = 0 AND (search_term = ? OR ? = '')
+            LIMIT ?
+        """, (search_term, search_term, limit)) as cur:
+            rows = await cur.fetchall()
+            return [dict(r) for r in rows]
+
+
+async def get_all_judgments(search_term="", limit=None, offset=0):
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        sql = "SELECT * FROM judgments WHERE search_term = ? OR ? = ''"
+        args = [search_term, search_term]
+        if limit:
+            sql += " LIMIT ? OFFSET ?"
+            args.extend([limit, offset])
+        async with db.execute(sql, args) as cur:
+            rows = await cur.fetchall()
+            return [dict(r) for r in rows]
+
+
+async def get_judgment_by_cnr(cnr):
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT * FROM judgments WHERE cnr = ?", (cnr,)
+        ) as cur:
+            row = await cur.fetchone()
+            return dict(row) if row else None
+
+
+async def upsert_search(search_term, mode, court, total_results=0):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("""
+            INSERT INTO searches (search_term, mode, court, total_results, created_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(search_term) DO UPDATE SET
+                mode = excluded.mode,
+                court = excluded.court,
+                total_results = COALESCE(excluded.total_results, searches.total_results)
+        """, (search_term, mode, court, total_results, datetime.utcnow().isoformat()))
+        await db.commit()
+
+
+async def get_search(search_term):
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT * FROM searches WHERE search_term = ?", (search_term,)
+        ) as cur:
+            row = await cur.fetchone()
+            return dict(row) if row else None
+
+
+async def increment_pages_fetched(search_term):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("""
+            UPDATE searches SET pages_fetched = pages_fetched + 1
+            WHERE search_term = ?
+        """, (search_term,))
+        await db.commit()
+
+
+async def log_download(cnr, pdf_path, search_term, success, file_size=0, session_cnr=""):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("""
+            INSERT INTO download_log
+            (cnr, pdf_path, search_term, downloaded_at, success, file_size, session_cnr)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (cnr, pdf_path, search_term, datetime.utcnow().isoformat(),
+              1 if success else 0, file_size, session_cnr))
+        await db.commit()
+
+
+async def search_judgments(query, court="", limit=50):
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        sql = "SELECT * FROM judgments WHERE 1=1"
+        args = []
+        if query:
+            sql += " AND (cnr LIKE ? OR case_title LIKE ? OR judge LIKE ?)"
+            q = f"%{query}%"
+            args.extend([q, q, q])
+        if court:
+            sql += " AND court LIKE ?"
+            args.append(f"%{court}%")
+        sql += " ORDER BY created_at DESC LIMIT ?"
+        args.append(limit)
+        async with db.execute(sql, args) as cur:
+            rows = await cur.fetchall()
+            return [dict(r) for r in rows]
+
+
+async def export_to_csv(search_term, out_path):
+    rows = await get_all_judgments(search_term)
+    if not rows:
+        return None
+    headers = ["cnr", "case_title", "court", "judge", "reg_date",
+               "decision_date", "disposal_nature", "pdf_path", "downloaded"]
+    import csv
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    with open(out_path, "w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=headers, extrasaction="ignore")
+        w.writeheader()
+        w.writerows(rows)
+    return out_path
+
+
+async def get_stats(search_term=""):
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        sql = "SELECT downloaded, COUNT(*) as count FROM judgments"
+        args = []
+        if search_term:
+            sql += " WHERE search_term = ?"
+            args.append(search_term)
+        sql += " GROUP BY downloaded"
+        async with db.execute(sql, args) as cur:
+            rows = await cur.fetchall()
+            total = sum(r["count"] for r in rows)
+            downloaded = next((r["count"] for r in rows if r["downloaded"] == 1), 0)
+            return {"total": total, "downloaded": downloaded, "pending": total - downloaded}

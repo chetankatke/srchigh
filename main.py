@@ -9,7 +9,7 @@ import os
 # Add src to path so imports work
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src"))
 
-from srchigh.main import run_cli
+from srchigh.main import main
 
 if __name__ == "__main__":
-    run_cli()
+    main()

@@ -3,7 +3,7 @@
 eCourts India — High Court Judgments Scraper
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Search, export metadata, and download judgments from all Indian High Courts.
+Search, store, and download judgments from all Indian High Courts.
 
 Usage:
   python3 main.py <search_term> [count] [options]
@@ -11,13 +11,15 @@ Usage:
 Examples:
   python3 main.py "divorce" 5
   python3 main.py "divorce" 5 --court bombay
-  python3 main.py "divorce" --court bombay --all --csv --no-download
-  python3 main.py --from-csv ~/myJud/divorce
+  python3 main.py "divorce" --court bombay --all --no-download
+  python3 main.py --download-db
+  python3 main.py --status
 """
 
 import sys
 import os
 import re
+import asyncio
 import logging
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
@@ -30,11 +32,9 @@ from .config import (
     mark_first_run_done,
 )
 from .session import ECourtSession
-from .export import write_results_csv
-from .download import download_from_csv
+from . import db
+from .download import download_from_db
 
-
-# ── argument parsing ──
 
 def parse_args():
     args = sys.argv[1:]
@@ -42,8 +42,8 @@ def parse_args():
         "search": "", "count": 5, "mode": "PHRASE", "proximity": "",
         "page": 0, "pages": None, "state": "", "judge": "",
         "from_date": "", "to_date": "", "out": "",
-        "court": "", "all": False, "csv": False, "no_dl": False,
-        "from_csv": "",
+        "court": "", "all": False, "no_dl": False,
+        "download_db": False, "status": False, "export_csv": "",
     }
     pos = 0
     i = 0
@@ -77,12 +77,14 @@ def parse_args():
             p["to_date"] = args[i + 1]; i += 2
         elif a == "--all":
             p["all"] = True; i += 1
-        elif a == "--csv":
-            p["csv"] = True; i += 1
         elif a == "--no-download":
             p["no_dl"] = True; i += 1
-        elif a == "--from-csv" and i + 1 < len(args):
-            p["from_csv"] = args[i + 1]; i += 2
+        elif a == "--download-db":
+            p["download_db"] = True; i += 1
+        elif a == "--status":
+            p["status"] = True; i += 1
+        elif a == "--export-csv" and i + 1 < len(args):
+            p["export_csv"] = args[i + 1]; i += 2
         elif a == "--out" and i + 1 < len(args):
             p["out"] = args[i + 1]; i += 2
         elif a.startswith("--"):
@@ -96,17 +98,7 @@ def parse_args():
             pos += 1
             i += 1
 
-    # --from-csv bypasses search term requirement
-    if p["from_csv"]:
-        p["out"] = p["from_csv"]
-        return p
-
-    # Default output dir: ~/myJud/<sanitized_search_term>
-    if not p["out"]:
-        safe = re.sub(r"[^a-zA-Z0-9]+", "_", p["search"]).strip("_").lower() or "search"
-        p["out"] = os.path.join(os.path.expanduser("~/myJud"), safe)
-
-    if not p["search"]:
+    if not p["search"] and not p["download_db"] and not p["status"] and not p["export_csv"]:
         print("Usage: python3 main.py <search_term> [count] [options]")
         print("  --court NAME            Filter by High Court (e.g. bombay, delhi)")
         print("  --mode PHRASE|ANY|ALL   Search mode (default: PHRASE)")
@@ -114,9 +106,10 @@ def parse_args():
         print("  --page N                Page number (default: 0)")
         print("  --pages M:N             Page range")
         print("  --all                   Download ALL matching results")
-        print("  --csv                   Export results as CSV (metadata)")
-        print("  --no-download           Skip PDF download, list only")
-        print("  --from-csv DIR          Download PDFs from saved CSV")
+        print("  --no-download           Skip PDF download, store in DB only")
+        print("  --download-db           Download pending PDFs from DB")
+        print("  --status                Show DB status for a search term")
+        print("  --export-csv PATH       Export DB results to CSV")
         print("  --state CODE            Filter by state code")
         print("  --judge NAME            Filter by judge name")
         print("  --from DATE             Start date DD-MM-YYYY")
@@ -126,20 +119,21 @@ def parse_args():
         print("Available courts: " + ", ".join(sorted(COURT_NAMES.keys())))
         sys.exit(1)
 
+    if not p["out"] and p["search"]:
+        safe = re.sub(r"[^a-zA-Z0-9]+", "_", p["search"]).strip("_").lower() or "search"
+        p["out"] = os.path.join(os.path.expanduser("~/myJud"), safe)
+
     return p
 
 
-# ── page downloader ──
-
-def download_page(ec, page_num, page_size, downloaded_cnrs=None):
-    """Fetch one page of results, optionally download PDFs."""
+async def download_page(ec, page_num, page_size, search_term, out_dir, downloaded_cnrs=None, no_dl=False):
     if downloaded_cnrs is None:
         downloaded_cnrs = set()
 
     log.info("")
     log.info("  Page %d (offset=%d)" % (page_num, page_num * page_size))
-    entries, total = ec.get_results(
-        P["search"], page=page_num, page_size=page_size,
+    entries, total = await ec.get_results(
+        search_term, page=page_num, page_size=page_size,
         mode=P["mode"], state_code=P["state"],
         judge_name=P["judge"], from_date=P["from_date"],
         to_date=P["to_date"], proximity=P["proximity"],
@@ -151,8 +145,8 @@ def download_page(ec, page_num, page_size, downloaded_cnrs=None):
         cnr = e.get("cnr", "") or e.get("case_title", "?")[:40]
         log.info("    " + cnr)
 
-    if not os.path.exists(P["out"]):
-        os.makedirs(P["out"], exist_ok=True)
+    if not os.path.exists(out_dir):
+        os.makedirs(out_dir, exist_ok=True)
 
     dl_count = 0
     page_entries = []
@@ -169,21 +163,20 @@ def download_page(ec, page_num, page_size, downloaded_cnrs=None):
             dl_count += 1
             continue
 
-        # --no-download: skip PDF entirely
-        if P["no_dl"]:
+        if no_dl:
             dl_count += 1
             continue
 
-        filename = os.path.join(P["out"], cnr + ".pdf")
+        filename = os.path.join(out_dir, cnr + ".pdf")
         if os.path.exists(filename) and os.path.getsize(filename) > 1000:
             downloaded_cnrs.add(cnr)
             dl_count += 1
             continue
 
         log.info("    Downloading %s..." % cnr)
-        url = ec.get_pdf_url(e)
+        url = await ec.get_pdf_url(e)
         if url:
-            sz = ec.download_pdf(url, filename)
+            sz = await ec.download_pdf(url, filename)
             if sz > 1000:
                 log.info("       OK %s (%d bytes)" % (os.path.basename(filename), sz))
                 dl_count += 1
@@ -203,38 +196,10 @@ def safe_remove(path):
             pass
 
 
-# ═══════════════ MAIN ═══════════════
-
-def run_cli():
-    """Entry point for the srchigh command-line tool."""
+async def run_search():
     global P
+    await db.init_db()
 
-    # ── First-run setup ──
-    if is_first_run() and len(sys.argv) > 1:
-        first_run_setup()
-    elif is_first_run():
-        # Just showing help, mark as done silently
-        mark_first_run_done()
-
-    # ── Parse CLI args + merge with saved config ──
-    P = parse_args()
-    P = apply_config_to_params(P)
-
-    # Route: --from-csv
-    if P["from_csv"]:
-        print("=" * 60)
-        print("  eCourts India — Download from CSV")
-        print("  CSV dir:  %s" % P["from_csv"])
-        print("=" * 60)
-        print("")
-        download_from_csv(P["from_csv"])
-        print("")
-        print("=" * 60)
-        print("  Done!")
-        print("=" * 60)
-        sys.exit(0)
-
-    # Header
     mode_label = MODE_LABELS.get(P["mode"], P["mode"])
     if P["mode"] == "ALL" and P["proximity"]:
         mode_label += " (prox=" + P["proximity"] + ")"
@@ -255,11 +220,10 @@ def run_cli():
     print("  Output:  " + P["out"])
     print("=" * 60)
 
-    # Session setup
     ec = ECourtSession()
     print("")
     print("[1] Establishing session...")
-    ec.s.get(BASE_URL, timeout=30)
+    await ec.client.get(BASE_URL)
     print("[2] Solving captcha...")
     court_code = ""
     if P["court"]:
@@ -270,24 +234,22 @@ def run_cli():
                     court_code = str(code)
                     break
     P["state"] = court_code or P["state"]
-    captcha_text, token = ec.solve_captcha(search_text=P["search"], search_opt=P["mode"])
+    captcha_text, token = await ec.solve_captcha(search_text=P["search"], search_opt=P["mode"])
     print("     Token: " + token[:16] + "...")
     print("[3] Loading search page...")
-    ec.load_results_page(P["search"], mode=P["mode"])
+    await ec.load_results_page(P["search"], mode=P["mode"])
 
-    # Warmup and total count
     page_size = min(P["count"], 25)
     if P["all"]:
         page_size = 200
     for _ in range(3):
-        ec.get_results(P["search"], page=0, page_size=page_size, mode=P["mode"],
-                       state_code=P["state"], proximity=P["proximity"])
-    test_entries, total = ec.get_results(
+        await ec.get_results(P["search"], page=0, page_size=page_size, mode=P["mode"],
+                             state_code=P["state"], proximity=P["proximity"])
+    test_entries, total = await ec.get_results(
         P["search"], page=0, page_size=page_size, mode=P["mode"],
         state_code=P["state"], proximity=P["proximity"],
     )
 
-    # Pages to fetch
     pages_to_fetch = []
     total_pages = 0
     if P["all"]:
@@ -301,7 +263,6 @@ def run_cli():
         pages_to_fetch = [P["page"]]
         total_pages = 1
 
-    # Summary
     print("")
     print("  " + "─" * 45)
     print("    Total matching:  %s" % ("{:,}".format(total) if total else "?"))
@@ -316,7 +277,6 @@ def run_cli():
             print("    Est. time:       ~%d sec" % eta)
     print("  " + "─" * 45)
 
-    # Existing files
     downloaded_cnrs = set()
     if os.path.exists(P["out"]):
         for f in os.listdir(P["out"]):
@@ -324,51 +284,129 @@ def run_cli():
                 downloaded_cnrs.add(f[:-4])
         log.info("     Already have %d PDFs in %s/" % (len(downloaded_cnrs), P["out"]))
 
-    # Download loop
     print("")
-    print("[4] Downloading %d page(s)..." % len(pages_to_fetch))
+    print("[4] Fetching %d page(s)..." % len(pages_to_fetch))
     total_dl = 0
     dl_since_refresh = 0
     all_entries = []
 
     for pg in pages_to_fetch:
         try:
-            dl_count, page_entries = download_page(ec, pg, page_size, downloaded_cnrs)
+            dl_count, page_entries = await download_page(
+                ec, pg, page_size, P["search"], P["out"], downloaded_cnrs, P["no_dl"]
+            )
             total_dl += dl_count
             dl_since_refresh += dl_count
             all_entries.extend(page_entries)
 
             if not P["no_dl"] and dl_since_refresh >= 20:
                 log.info("  === Rotating session (%d downloads) ===" % 20)
+                await ec.close()
                 ec = ECourtSession()
-                ec.s.get(BASE_URL, timeout=30)
-                ct, tk = ec.solve_captcha(search_text=P["search"], search_opt=P["mode"])
-                ec.load_results_page(P["search"], captcha=ct, mode=P["mode"])
+                await ec.client.get(BASE_URL)
+                ct, tk = await ec.solve_captcha(search_text=P["search"], search_opt=P["mode"])
+                await ec.load_results_page(P["search"], captcha=ct, mode=P["mode"])
                 dl_since_refresh = 0
 
         except Exception as ex:
             log.error("  Failed page %d: %s" % (pg, ex))
             if not P["no_dl"]:
+                await ec.close()
                 ec = ECourtSession()
-                ec.s.get(BASE_URL, timeout=30)
-                ct, tk = ec.solve_captcha(search_text=P["search"], search_opt=P["mode"])
-                ec.load_results_page(P["search"], captcha=ct, mode=P["mode"])
+                await ec.client.get(BASE_URL)
+                ct, tk = await ec.solve_captcha(search_text=P["search"], search_opt=P["mode"])
+                await ec.load_results_page(P["search"], captcha=ct, mode=P["mode"])
                 dl_since_refresh = 0
 
-    # CSV export
-    if P["csv"] and all_entries:
-        csv_path = write_results_csv(P["out"], all_entries)
-        if csv_path:
-            log.info("  CSV saved: %s (%d entries)" % (csv_path, len(all_entries)))
+    if all_entries:
+        await db.insert_judgments_batch(all_entries, P["search"])
+        await db.upsert_search(P["search"], P["mode"], P["court"], total)
+        log.info("  Stored %d entries in DB" % len(all_entries))
 
-    # Done
+    await ec.close()
+
     print("")
     print("=" * 60)
     if P["no_dl"]:
-        print("  Done! %d results. Use --from-csv to download PDFs later." % len(all_entries))
+        print("  Done! %d results stored in DB. Use --download-db to download PDFs." % len(all_entries))
     else:
         print("  Done! %d PDF(s) downloaded to %s/" % (total_dl, P["out"]))
     print("=" * 60)
 
+
+async def run_download_db():
+    await db.init_db()
+    print("=" * 60)
+    print("  eCourts India — Download from DB")
+    print("=" * 60)
+    print("")
+    await download_from_db(search_term=P.get("search", ""), out_dir=P.get("out"))
+    print("")
+    print("=" * 60)
+    print("  Done!")
+    print("=" * 60)
+
+
+async def run_status():
+    await db.init_db()
+    search_term = P.get("search", "")
+    stats = await db.get_stats(search_term)
+    entries = await db.get_all_judgments(search_term) if search_term else []
+    print("=" * 60)
+    print("  DB Status for: %s" % (search_term or "all searches"))
+    print("=" * 60)
+    print("  Total judgments:  %d" % stats["total"])
+    print("  Downloaded:      %d" % stats["downloaded"])
+    print("  Pending:         %d" % stats["pending"])
+    if entries:
+        print("")
+        print("  Recent entries:")
+        for e in entries[:10]:
+            dl = "✓" if e.get("downloaded") else "✗"
+            print("    [%s] %s | %s" % (dl, e.get("cnr", "?"), e.get("case_title", "?")[:50]))
+    print("=" * 60)
+
+
+async def run_export_csv():
+    await db.init_db()
+    search_term = P.get("search", "")
+    out_path = P.get("export_csv", "")
+    if not out_path:
+        out_path = os.path.join(os.path.expanduser("~"), "myJud", search_term or "export", "_results.csv")
+    result = await db.export_to_csv(search_term, out_path)
+    if result:
+        log.info("  Exported to %s" % result)
+    else:
+        log.info("  No entries to export")
+
+
+async def run_cli():
+    global P
+
+    if is_first_run() and len(sys.argv) > 1:
+        first_run_setup()
+    elif is_first_run():
+        mark_first_run_done()
+
+    P = parse_args()
+    P = apply_config_to_params(P)
+
+    if P["status"]:
+        await run_status()
+    elif P["export_csv"]:
+        await run_export_csv()
+    elif P["download_db"]:
+        await run_download_db()
+    else:
+        await run_search()
+
+
+P = {}
+
+
+def main():
+    asyncio.run(run_cli())
+
+
 if __name__ == "__main__":
-    run_cli()
+    main()

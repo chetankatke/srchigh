@@ -1,19 +1,16 @@
 """
-ECourtSession — handles all interactions with the eCourts server:
-session management, captcha solving, search, and PDF download.
+ECourtSession — async HTTP session with eCourts server using httpx.
+Handles captcha solving, search, and PDF URL retrieval.
 
-Uses requests.Session with Chrome 120+ TLS fingerprint headers
-for stealth. Optionally supports FetcherSession from Scrapling
-if installed (better anti-bot evasion).
+Chrome 120+ TLS fingerprint headers for stealth.
 """
 
 import io
 import json
 import re
-import time
-import urllib.parse
+import asyncio
 
-import requests
+import httpx
 from PIL import Image
 import pytesseract
 
@@ -21,15 +18,6 @@ from .config import BASE_URL, USER_AGENT
 from .parser import parse_entry, parse_results_page
 
 
-# ── Try to use scrapling's FetcherSession for better stealth ──
-try:
-    from scrapling.fetchers import FetcherSession as _FetcherSession
-    HAS_SCRAPLING = True
-except ImportError:
-    HAS_SCRAPLING = False
-
-
-# ── Chrome 120+ realistic headers ──
 CHROME_HEADERS = {
     "User-Agent": USER_AGENT,
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,"
@@ -49,42 +37,23 @@ CHROME_HEADERS = {
 
 
 class ECourtSession:
-    """Manages one session with the eCourts PDF Search portal.
-    
-    Uses standard requests.Session by default, or Scrapling's FetcherSession
-    if installed for better TLS fingerprinting and anti-bot evasion.
-    """
-
-    def __init__(self, use_scrapling=False):
-        if use_scrapling and HAS_SCRAPLING:
-            self.s = _FetcherSession(impersonate='chrome')
-            self._scrapling = True
-        else:
-            self.s = requests.Session()
-            self.s.headers.update(CHROME_HEADERS)
-            self._scrapling = False
+    def __init__(self):
+        self.client = httpx.AsyncClient(timeout=30.0, headers=dict(CHROME_HEADERS))
         self.app_token = ""
         self.captcha_text = ""
 
-    # ── session lifecycle ──
-
-    def fresh(self):
-        """Replace the underlying session (new cookies, new token)."""
-        if self._scrapling and HAS_SCRAPLING:
-            self.s = _FetcherSession(impersonate='chrome')
-        else:
-            self.s = requests.Session()
-            self.s.headers.update(CHROME_HEADERS)
+    async def fresh(self):
+        await self.client.aclose()
+        self.client = httpx.AsyncClient(timeout=30.0, headers=dict(CHROME_HEADERS))
         self.app_token = ""
 
-    def _get(self, path, **kwargs):
-        return self.s.get(BASE_URL + path, timeout=30, **kwargs)
+    async def _get(self, path, **kwargs):
+        return await self.client.get(BASE_URL + path, **kwargs)
 
-    def _post(self, path, data=None, **kwargs):
-        return self.s.post(BASE_URL + path, data=data, timeout=30, **kwargs)
+    async def _post(self, path, data=None, **kwargs):
+        return await self.client.post(BASE_URL + path, data=data, **kwargs)
 
     def _render_image_to_ascii(self, img, width=60):
-        """Converts a PIL Image to a text representation using Unicode/ASCII block characters."""
         try:
             resample = Image.Resampling.BILINEAR
         except AttributeError:
@@ -98,8 +67,6 @@ class ECourtSession:
 
         img_resized = img.resize((width, height), resample)
 
-        # Ramp from darkest (text) to lightest (background)
-        # Using blocks so that text (darker pixels) is solid and background is empty.
         ramp = "█▓▒░:  "
         lines = []
         for y in range(height):
@@ -117,16 +84,12 @@ class ECourtSession:
         bottom_border = "    \033[90m└" + "─" * width + "┘\033[0m"
         return border + "\n" + "\n".join(lines) + "\n" + bottom_border
 
-    # ── captcha ──
-
-    def solve_captcha(self, search_text="test", search_opt="PHRASE",
-                      court_type="2", max_tries=30):
-        """Fetch captcha image, OCR it, validate against server.
-        Returns (captcha_text, app_token)."""
+    async def solve_captcha(self, search_text="test", search_opt="PHRASE",
+                            court_type="2", max_tries=30):
         for attempt in range(1, max_tries + 1):
             print(f"\n\033[1;36m┌── Captcha Attempt {attempt}/{max_tries} ──────────────────────────────────────┐\033[0m", flush=True)
             try:
-                cr = self._get("vendor/securimage/securimage_show.php")
+                cr = await self._get("vendor/securimage/securimage_show.php")
                 img = Image.open(io.BytesIO(cr.content)).convert("L")
                 print("    \033[1;33mDownloaded Captcha Image:\033[0m", flush=True)
                 print(self._render_image_to_ascii(img), flush=True)
@@ -169,7 +132,7 @@ class ECourtSession:
             for guess in sorted(guesses):
                 try:
                     print(f"      Testing guess \033[1;35m'{guess}'\033[0m ... ", end="", flush=True)
-                    r = self._post("?p=pdf_search/checkCaptcha", data={
+                    r = await self._post("?p=pdf_search/checkCaptcha", data={
                         "captcha": guess,
                         "search_text": search_text,
                         "search_opt": search_opt,
@@ -192,28 +155,25 @@ class ECourtSession:
 
             print("\033[1;36m└──────────────────────────────────────────────────────────────────┘\033[0m", flush=True)
             if attempt % 5 == 0:
-                self.fresh()
+                await self.fresh()
 
         raise RuntimeError("Failed to solve captcha after %d tries" % max_tries)
 
-    # ── search ──
-
-    def load_results_page(self, search_term, captcha=None, mode="PHRASE"):
-        """GET the search results page (establishes server-side session state)."""
+    async def load_results_page(self, search_term, captcha=None, mode="PHRASE"):
         c = captcha or self.captcha_text
+        import urllib.parse
         url = ("?p=pdf_search/home&text=" + urllib.parse.quote(search_term) +
                "&captcha=" + c + "&search_opt=" + mode +
                "&fcourt_type=2&app_token=" + self.app_token)
-        r = self._get(url)
+        r = await self._get(url)
         m = re.search(r'app_token=([^"&\s<>]+)', r.text)
         if m:
             self.app_token = m.group(1)
         return r.text
 
-    def get_results(self, search_term, page=0, page_size=25, mode="PHRASE",
-                    state_code="", judge_name="", from_date="", to_date="",
-                    proximity=""):
-        """POST to the DataTable endpoint. Returns (entries_list, total_count)."""
+    async def get_results(self, search_term, page=0, page_size=25, mode="PHRASE",
+                          state_code="", judge_name="", from_date="", to_date="",
+                          proximity=""):
         fields = [
             "state_code", "dist_code", "judge_name", "judge_arr",
             "act_txt", "section_txt", "case_no", "case_year", "pet_res",
@@ -240,7 +200,7 @@ class ECourtSession:
             "ajax_req": "true",
             "app_token": self.app_token,
         })
-        r = self._post("?p=pdf_search/home", data=dt)
+        r = await self._post("?p=pdf_search/home", data=dt)
         if r.status_code != 200:
             return [], 0
         try:
@@ -252,14 +212,11 @@ class ECourtSession:
         entries, total = parse_results_page(j)
         return entries, total
 
-    # ── PDF download ──
-
-    def get_pdf_url(self, entry):
-        """Call openpdfcaptcha → returns temporary PDF download URL."""
+    async def get_pdf_url(self, entry):
         path = entry.get("path", "")
         val = entry.get("val", "0")
         for _ in range(2):
-            r = self._post("?p=pdf_search/openpdfcaptcha", data={
+            r = await self._post("?p=pdf_search/openpdfcaptcha", data={
                 "val": val,
                 "lang_flg": "",
                 "path": path,
@@ -286,10 +243,9 @@ class ECourtSession:
                     return "https://judgments.ecourts.gov.in/" + out
         return None
 
-    def download_pdf(self, url, filename):
-        """Download a PDF from a temp URL. Returns bytes written or 0."""
+    async def download_pdf(self, url, filename):
         try:
-            r = self.s.get(url, timeout=60, stream=True)
+            r = await self.client.get(url, timeout=60.0)
             if r.status_code == 200:
                 ct = r.headers.get("Content-Type", "").lower()
                 if "pdf" in ct or len(r.content) > 1000:
@@ -300,10 +256,12 @@ class ECourtSession:
             pass
         return 0
 
-    def get_pdf_url_for_path(self, pdf_path):
-        """Convenience: call openpdfcaptcha with just a path (val=0)."""
-        return self.get_pdf_url({
+    async def get_pdf_url_for_path(self, pdf_path):
+        return await self.get_pdf_url({
             "path": pdf_path,
             "val": "0",
             "citation_year": "",
         })
+
+    async def close(self):
+        await self.client.aclose()

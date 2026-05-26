@@ -2,13 +2,14 @@ from setuptools import setup, find_packages
 
 setup(
     name="srchigh",
-    version="2.0.0",
+    version="2.1.0",
     description="eCourts India — High Court Judgments Scraper",
     python_requires=">=3.9",
     packages=find_packages(where="src"),
     package_dir={"": "src"},
     install_requires=[
-        "requests>=2.31.0",
+        "httpx>=0.27.0",
+        "aiosqlite>=0.20.0",
         "Pillow>=10.0.0",
         "pytesseract>=0.3.10",
         "parsel>=1.10.0",
@@ -16,7 +17,7 @@ setup(
     ],
     entry_points={
         "console_scripts": [
-            "srchigh = srchigh.main:run_cli",
+            "srchigh = srchigh.main:main",
         ],
     },
 )
