@@ -222,14 +222,13 @@ class GuiApp:
         style.map("Browse.TButton", background=[("active", "#555555")])
 
     def create_widgets(self):
-        self.root.columnconfigure(0, weight=1)
+        self.root.columnconfigure(0, weight=1, minsize=320)
         self.root.columnconfigure(1, weight=2)
         self.root.rowconfigure(0, weight=1)
         
         # Left Panel (Config Forms)
         left_frame = tk.Frame(self.root, bg="#252526", padx=15, pady=15, width=320)
         left_frame.grid(row=0, column=0, sticky="nsew", padx=(10, 5), pady=10)
-        left_frame.grid_propagate(False)
         
         # Right Panel (Logging and Captcha Visualizer)
         right_frame = tk.Frame(self.root, bg="#1e1e1e", padx=10, pady=15)
