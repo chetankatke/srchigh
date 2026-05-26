@@ -209,7 +209,6 @@ class GuiApp:
         # Left Panel (Config Forms)
         left_frame = tk.Frame(self.root, bg="#ffffff", padx=15, pady=15, width=320, bd=1, relief="solid", highlightthickness=1, highlightbackground="#e5e7eb")
         left_frame.grid(row=0, column=0, sticky="nsew", padx=(15, 5), pady=15)
-        left_frame.grid_propagate(False)
         
         # Right Panel (Logging and Captcha Visualizer)
         right_frame = tk.Frame(self.root, bg="#f3f4f6", padx=10, pady=15)
