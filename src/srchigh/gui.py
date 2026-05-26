@@ -200,6 +200,7 @@ class GuiApp:
         
         self.tk_img = None
         self.create_widgets()
+        self.root.after(2000, self.take_diagnostic_screenshot)
         
     def create_widgets(self):
         self.root.columnconfigure(0, weight=1, minsize=320)
@@ -369,6 +370,14 @@ class GuiApp:
                 messagebox.showerror("Validation Error", self.ctrl.error_message)
         self.root.after(0, reset_ui)
         
+    def take_diagnostic_screenshot(self):
+        import subprocess
+        try:
+            subprocess.run(["screencapture", "-x", "/Users/ck/srchigh/gui_actual_run.png"], check=True)
+            print("DEBUG: Took diagnostic screenshot at /Users/ck/srchigh/gui_actual_run.png")
+        except Exception as e:
+            print(f"DEBUG: Failed to take screenshot: {e}")
+
     def run(self):
         self.root.mainloop()
 
