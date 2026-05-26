@@ -192,7 +192,7 @@ class GuiApp:
         self.root = tk.Tk()
         self.root.title("srchigh — eCourts India Scraper Dashboard")
         self.root.geometry("950x680")
-        self.root.configure(bg="#1e1e1e")
+        self.root.configure(bg="#f3f4f6")
         
         self.ctrl = GuiController()
         self.ctrl.on_log = self.append_log
@@ -207,83 +207,90 @@ class GuiApp:
         self.root.rowconfigure(0, weight=1)
         
         # Left Panel (Config Forms)
-        left_frame = tk.Frame(self.root, bg="#252526", padx=15, pady=15, width=320)
-        left_frame.grid(row=0, column=0, sticky="nsew", padx=(10, 5), pady=10)
+        left_frame = tk.Frame(self.root, bg="#ffffff", padx=15, pady=15, width=320, bd=1, relief="solid", highlightthickness=1, highlightbackground="#e5e7eb")
+        left_frame.grid(row=0, column=0, sticky="nsew", padx=(15, 5), pady=15)
+        left_frame.grid_propagate(False)
         
         # Right Panel (Logging and Captcha Visualizer)
-        right_frame = tk.Frame(self.root, bg="#1e1e1e", padx=10, pady=15)
-        right_frame.grid(row=0, column=1, sticky="nsew", padx=(5, 10), pady=10)
+        right_frame = tk.Frame(self.root, bg="#f3f4f6", padx=10, pady=15)
+        right_frame.grid(row=0, column=1, sticky="nsew", padx=(5, 15), pady=15)
         right_frame.columnconfigure(0, weight=1)
         right_frame.rowconfigure(1, weight=1)
         
         # App Title
-        title_label = tk.Label(left_frame, text="srchigh Scraper GUI", bg="#252526", fg="#00adb5", font=("Helvetica", 14, "bold"))
+        title_label = tk.Label(left_frame, text="srchigh Scraper GUI", bg="#ffffff", fg="#00adb5", font=("Helvetica", 14, "bold"))
         title_label.grid(row=0, column=0, columnspan=2, pady=(0, 20), sticky="w")
         
         # Search Term Field
-        tk.Label(left_frame, text="Search Term:", bg="#252526", fg="#f0f0f0", font=("Helvetica", 10)).grid(row=1, column=0, sticky="w", pady=5)
-        self.search_entry = tk.Entry(left_frame, width=28, bg="#333333", fg="#f0f0f0", insertbackground="#f0f0f0", bd=1, relief="solid")
+        tk.Label(left_frame, text="Search Term:", bg="#ffffff", fg="#1f2937", font=("Helvetica", 10)).grid(row=1, column=0, sticky="w", pady=5)
+        self.search_entry = tk.Entry(left_frame, width=28, bg="#f9fafb", fg="#1f2937", insertbackground="#1f2937", bd=1, relief="solid", highlightthickness=1, highlightbackground="#d1d5db")
         self.search_entry.grid(row=2, column=0, columnspan=2, sticky="w", pady=2)
         
         # High Court Dropdown
-        tk.Label(left_frame, text="Filter High Court:", bg="#252526", fg="#f0f0f0", font=("Helvetica", 10)).grid(row=3, column=0, sticky="w", pady=5)
+        tk.Label(left_frame, text="Filter High Court:", bg="#ffffff", fg="#1f2937", font=("Helvetica", 10)).grid(row=3, column=0, sticky="w", pady=5)
         courts = [""] + sorted(list(COURT_NAMES.keys()))
         self.court_var = tk.StringVar(self.root)
         self.court_var.set("")
         self.court_menu = tk.OptionMenu(left_frame, self.court_var, *courts)
-        self.court_menu.configure(bg="#333333", fg="#f0f0f0", highlightbackground="#252526", activebackground="#444444", activeforeground="#f0f0f0", width=22)
+        self.court_menu.configure(bg="#ffffff", fg="#1f2937", highlightbackground="#ffffff", activebackground="#f3f4f6", activeforeground="#1f2937", width=22)
         self.court_menu.grid(row=4, column=0, columnspan=2, sticky="w", pady=2)
         
         # Download Count
-        tk.Label(left_frame, text="Max Results count:", bg="#252526", fg="#f0f0f0", font=("Helvetica", 10)).grid(row=5, column=0, sticky="w", pady=5)
-        self.count_spin = tk.Spinbox(left_frame, from_=1, to=200, width=10, bg="#333333", fg="#f0f0f0", buttonbackground="#252526", insertbackground="#f0f0f0")
+        tk.Label(left_frame, text="Max Results count:", bg="#ffffff", fg="#1f2937", font=("Helvetica", 10)).grid(row=5, column=0, sticky="w", pady=5)
+        self.count_spin = tk.Spinbox(left_frame, from_=1, to=200, width=10, bg="#f9fafb", fg="#1f2937", buttonbackground="#e5e7eb", insertbackground="#1f2937", bd=1, relief="solid", highlightthickness=1, highlightbackground="#d1d5db")
         self.count_spin.delete(0, "end")
         self.count_spin.insert(0, "5")
         self.count_spin.grid(row=6, column=0, sticky="w", pady=2)
         
         # Date Bounds
-        tk.Label(left_frame, text="Dates Bounds (DD-MM-YYYY):", bg="#252526", fg="#f0f0f0", font=("Helvetica", 10, "bold")).grid(row=7, column=0, columnspan=2, sticky="w", pady=(15, 5))
+        tk.Label(left_frame, text="Dates Bounds (DD-MM-YYYY):", bg="#ffffff", fg="#1f2937", font=("Helvetica", 10, "bold")).grid(row=7, column=0, columnspan=2, sticky="w", pady=(15, 5))
         
-        tk.Label(left_frame, text="From Date:", bg="#252526", fg="#f0f0f0", font=("Helvetica", 9)).grid(row=8, column=0, sticky="w")
-        self.from_entry = tk.Entry(left_frame, width=12, bg="#333333", fg="#f0f0f0", insertbackground="#f0f0f0", bd=1, relief="solid")
+        tk.Label(left_frame, text="From Date:", bg="#ffffff", fg="#1f2937", font=("Helvetica", 9)).grid(row=8, column=0, sticky="w")
+        self.from_entry = tk.Entry(left_frame, width=12, bg="#f9fafb", fg="#1f2937", insertbackground="#1f2937", bd=1, relief="solid", highlightthickness=1, highlightbackground="#d1d5db")
         self.from_entry.grid(row=9, column=0, sticky="w", pady=2)
         
-        tk.Label(left_frame, text="To Date:", bg="#252526", fg="#f0f0f0", font=("Helvetica", 9)).grid(row=8, column=1, sticky="w")
-        self.to_entry = tk.Entry(left_frame, width=12, bg="#333333", fg="#f0f0f0", insertbackground="#f0f0f0", bd=1, relief="solid")
+        tk.Label(left_frame, text="To Date:", bg="#ffffff", fg="#1f2937", font=("Helvetica", 9)).grid(row=8, column=1, sticky="w")
+        self.to_entry = tk.Entry(left_frame, width=12, bg="#f9fafb", fg="#1f2937", insertbackground="#1f2937", bd=1, relief="solid", highlightthickness=1, highlightbackground="#d1d5db")
         self.to_entry.grid(row=9, column=1, sticky="w", pady=2)
         
         # Download Output Directory
-        tk.Label(left_frame, text="Output Directory:", bg="#252526", fg="#f0f0f0", font=("Helvetica", 10)).grid(row=10, column=0, columnspan=2, sticky="w", pady=(20, 5))
-        self.dir_entry = tk.Entry(left_frame, width=20, bg="#333333", fg="#f0f0f0", insertbackground="#f0f0f0", bd=1, relief="solid")
+        tk.Label(left_frame, text="Output Directory:", bg="#ffffff", fg="#1f2937", font=("Helvetica", 10)).grid(row=10, column=0, columnspan=2, sticky="w", pady=(20, 5))
+        self.dir_entry = tk.Entry(left_frame, width=20, bg="#f9fafb", fg="#1f2937", insertbackground="#1f2937", bd=1, relief="solid", highlightthickness=1, highlightbackground="#d1d5db")
         self.dir_entry.insert(0, self.ctrl.output_dir)
         self.dir_entry.grid(row=11, column=0, sticky="w", pady=2)
         
         # Browse Button
-        self.browse_btn = tk.Button(left_frame, text="Browse", bg="#444444", fg="#ffffff", highlightbackground="#252526", activebackground="#555555", activeforeground="#ffffff", command=self.browse_directory, width=8)
+        self.browse_btn = tk.Button(left_frame, text="Browse", bg="#e5e7eb", fg="#374151", highlightbackground="#ffffff", activebackground="#d1d5db", activeforeground="#374151", command=self.browse_directory, width=8)
         self.browse_btn.grid(row=11, column=1, sticky="w", padx=(5, 0), pady=2)
         
         # Trigger button
-        self.run_btn = tk.Button(left_frame, text="Start Scraper", bg="#00adb5", fg="#ffffff", highlightbackground="#252526", activebackground="#008080", activeforeground="#ffffff", font=("Helvetica", 10, "bold"), command=self.start_scrape)
+        self.run_btn = tk.Button(left_frame, text="Start Scraper", bg="#00adb5", fg="#ffffff", highlightbackground="#ffffff", activebackground="#008080", activeforeground="#ffffff", font=("Helvetica", 10, "bold"), command=self.start_scrape)
         self.run_btn.grid(row=12, column=0, columnspan=2, pady=(35, 0), sticky="ew")
 
         # Captcha Display Frame
-        captcha_frame = tk.LabelFrame(right_frame, text=" Captcha Image ", bg="#1e1e1e", fg="#00adb5", padx=10, pady=5, font=("Helvetica", 10, "bold"))
-        captcha_frame.grid(row=0, column=0, sticky="ew", pady=(0, 10))
+        captcha_card = tk.Frame(right_frame, bg="#ffffff", padx=15, pady=10, bd=1, relief="solid", highlightthickness=1, highlightbackground="#e5e7eb")
+        captcha_card.grid(row=0, column=0, sticky="ew", pady=(0, 10))
         
-        self.captcha_label = tk.Label(captcha_frame, text="Waiting for scraper to download captcha...", bg="#1e1e1e", fg="#888888", font=("Helvetica", 10, "italic"))
-        self.captcha_label.pack(pady=10)
+        captcha_title = tk.Label(captcha_card, text="Captcha Image", bg="#ffffff", fg="#00adb5", font=("Helvetica", 10, "bold"))
+        captcha_title.pack(anchor="w", pady=(0, 5))
+        
+        self.captcha_label = tk.Label(captcha_card, text="Waiting for scraper to download captcha...", bg="#f9fafb", fg="#6b7280", font=("Helvetica", 10, "italic"), height=4)
+        self.captcha_label.pack(fill="x", expand=True)
         
         # Output Terminal Frame
-        log_frame = tk.LabelFrame(right_frame, text=" Scraper Output Log ", bg="#1e1e1e", fg="#00adb5", font=("Helvetica", 10, "bold"))
-        log_frame.grid(row=1, column=0, sticky="nsew")
-        log_frame.rowconfigure(0, weight=1)
-        log_frame.columnconfigure(0, weight=1)
+        log_card = tk.Frame(right_frame, bg="#ffffff", padx=15, pady=10, bd=1, relief="solid", highlightthickness=1, highlightbackground="#e5e7eb")
+        log_card.grid(row=1, column=0, sticky="nsew")
+        log_card.rowconfigure(1, weight=1)
+        log_card.columnconfigure(0, weight=1)
         
-        self.log_text = tk.Text(log_frame, bg="#0d0d0d", fg="#a6e22e", insertbackground="#f8f8f2", font=("Courier New", 10), state="disabled", wrap="word", bd=0)
-        self.log_text.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
+        log_title = tk.Label(log_card, text="Scraper Output Log", bg="#ffffff", fg="#00adb5", font=("Helvetica", 10, "bold"))
+        log_title.grid(row=0, column=0, sticky="w", pady=(0, 5))
         
-        scrollbar = tk.Scrollbar(log_frame, command=self.log_text.yview, bg="#1e1e1e", highlightbackground="#1e1e1e")
-        scrollbar.grid(row=0, column=1, sticky="ns", padx=(0, 5), pady=5)
+        self.log_text = tk.Text(log_card, bg="#111827", fg="#34d399", insertbackground="#ffffff", font=("Courier New", 10), state="disabled", wrap="word", bd=0)
+        self.log_text.grid(row=1, column=0, sticky="nsew")
+        
+        scrollbar = tk.Scrollbar(log_card, command=self.log_text.yview, bg="#111827", highlightbackground="#111827")
+        scrollbar.grid(row=1, column=1, sticky="ns", padx=(5, 0))
         self.log_text.configure(yscrollcommand=scrollbar.set)
         
     def browse_directory(self):
