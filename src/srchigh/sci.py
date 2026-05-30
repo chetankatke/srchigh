@@ -183,17 +183,24 @@ class SCISession:
                 print("    \033[1;33mCaptcha image:\033[0m", flush=True)
                 print(self._render_captcha_ascii(img), flush=True)
 
-            # Upscale + denoise
-            enhanced = img.resize((img.width * 2, img.height * 2), Image.Resampling.LANCZOS)
-            enhanced = enhanced.filter(ImageFilter.MedianFilter(size=3))
+            # Auto-crop to remove whitespace borders
+            try:
+                bbox = img.getbbox()
+                if bbox:
+                    img = img.crop(bbox)
+            except Exception:
+                pass
 
-            # Morphological dilation to separate touching characters
-            dilated = enhanced.filter(ImageFilter.MinFilter(size=3))
+            # Try multiple upscale factors (text is very small)
+            sources_list = []
+            for scale in (4, 3, 2):
+                up = img.resize((img.width * scale, img.height * scale), Image.Resampling.LANCZOS)
+                up = up.filter(ImageFilter.MedianFilter(size=3))
+                sources_list.append(("4x" if scale == 4 else "3x" if scale == 3 else "2x", up))
 
-            # Try multiple OCR configurations to read the math expression
-            candidates = {}  # answer -> (source_key, count)
-            raw_reads = []  # (source_key, raw_text) for diagnosis
-            for src_label, src_img in [("dilated", dilated), ("enhanced", enhanced), ("original", img)]:
+            candidates = {}
+            raw_reads = []
+            for src_label, src_img in sources_list:
                 for psm in (7, 6, 13, 8):
                     for thresh in range(80, 201, 10):
                         bw = src_img.point(lambda x, t=thresh: 0 if x < t else 255)
