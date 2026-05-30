@@ -477,7 +477,7 @@ async def run_sci_search():
     total_found = 0
 
     for chunk_idx, (chunk_from, chunk_to) in enumerate(chunks, 1):
-        print("\n") + "─" * 50
+        print("\n" + "─" * 50)
         print("  Chunk %d/%d: %s  →  %s" % (chunk_idx, len(chunks),
                                                _fmt_date(chunk_from), _fmt_date(chunk_to)))
 
