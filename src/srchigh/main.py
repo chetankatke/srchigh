@@ -489,16 +489,21 @@ async def run_sci_search():
         print("  [3] Searching...")
         # Retry search with fresh captcha on captcha failure
         entries = []
+        captcha_failed = False
         for sci_retry in range(5):
             entries, captcha_ok = await ec.search(chunk_from, chunk_to)
             if captcha_ok:
                 break
+            captcha_failed = True
             print("    Captcha rejected, retrying with fresh session...")
             await ec.fresh()
             await ec.solve_captcha()
 
         if not entries:
-            print("  No results for this range (or captcha failed after 5 retries).")
+            if captcha_failed:
+                print("  No results after captcha retries exhausted.")
+            else:
+                print("  No judgments found for this date range.")
             await ec.close()
             continue
 
