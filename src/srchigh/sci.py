@@ -112,8 +112,55 @@ class SCISession:
             self.tok_value = m.group(2)
         return html
 
+    def _render_captcha_ascii(self, img, width=60):
+        """Render a captcha image as ASCII art for debugging."""
+        try:
+            resample = Image.Resampling.BILINEAR
+        except AttributeError:
+            resample = Image.BILINEAR
+        w, h = img.size
+        aspect = h / w
+        height = max(1, int(width * aspect * 0.5))
+        img_small = img.resize((width, height), resample)
+        ramp = "█▓▒░:  "
+        lines = []
+        for y in range(height):
+            row = []
+            for x in range(width):
+                v = img_small.getpixel((x, y))
+                if isinstance(v, tuple):
+                    v = int(0.299 * v[0] + 0.587 * v[1] + 0.114 * v[2])
+                idx = max(0, min(int(v * (len(ramp) - 1) / 255.0), len(ramp) - 1))
+                row.append(ramp[idx])
+            lines.append("    \033[90m│\033[0m" + "".join(row) + "\033[90m│\033[0m")
+        border = "    \033[90m┌" + "─" * width + "┐\033[0m"
+        bottom = "    \033[90m└" + "─" * width + "┘\033[0m"
+        return border + "\n" + "\n".join(lines) + "\n" + bottom
+
+    def _solve_math_captcha(self, ocr_text):
+        """Parse a math expression from OCR and return the computed answer, or None.
+
+        Handles formats like '25+17', '25 + 17', '25+17=', and '25+17=?'.
+        """
+        # Strip trailing garbage (=, ?, spaces, non-alphanumeric)
+        clean = ocr_text.strip().rstrip("=? \t")
+        # Try to match: digits operator digits
+        m = re.match(r'(\d+)\s*([+-])\s*(\d+)', clean)
+        if not m:
+            return None
+        a, op, b = int(m.group(1)), m.group(2), int(m.group(3))
+        if op == '+':
+            return str(a + b)
+        elif op == '-':
+            return str(a - b) if a >= b else None
+        return None
+
     async def solve_captcha(self, max_tries=30):
-        """Download and OCR the securimage-wp captcha (same Securimage engine)."""
+        """Download and solve the securimage-wp **math** captcha.
+        
+        The SCI site uses Securimage in math mode — the image shows an arithmetic
+        expression like '25+17' and the answer is the computed number.
+        """
         for attempt in range(1, max_tries + 1):
             url = CAPTCHA_URL + self.scid
             print(f"\n\033[1;36m┌── Captcha Attempt {attempt}/{max_tries} ──────────────────────────────────────┐\033[0m", flush=True)
@@ -122,45 +169,65 @@ class SCISession:
                 img = Image.open(io.BytesIO(cr.content)).convert("L")
             except Exception as e:
                 print(f"    \033[1;31mError fetching captcha: {e}\033[0m", flush=True)
-                print("\033[1;36m└──────────────────────────────────────────────────────────────────┘\033[0m", flush=True)
                 if attempt % 5 == 0:
                     await self.fresh()
                 continue
 
+            # Upscale + denoise
             enhanced = img.resize((img.width * 2, img.height * 2), Image.Resampling.LANCZOS)
             enhanced = enhanced.filter(ImageFilter.MedianFilter(size=3))
 
-            guesses_by_thresh = {}
-            guesses = set()
-            for thresh in (110, 120, 130, 140, 150, 160, 170):
-                bw = enhanced.point(lambda x, t=thresh: 0 if x < t else 255)
-                text = pytesseract.image_to_string(
-                    bw,
-                    config="--psm 8 -c tessedit_char_whitelist="
-                           "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-                           "abcdefghijklmnopqrstuvwxyz0123456789",
-                ).strip()
-                text = re.sub(r"[^a-zA-Z0-9]", "", text)
-                if 4 <= len(text) <= 6:
-                    guesses.add(text)
-                    guesses_by_thresh[thresh] = text
-                else:
-                    guesses_by_thresh[thresh] = f"{text} (ignored, len={len(text)})"
+            # Try multiple OCR configurations to read the math expression
+            candidates = {}  # answer -> (source_key, count)
+            raw_reads = []  # (source_key, raw_text) for diagnosis
+            for src_label, src_img in [("enhanced", enhanced), ("original", img)]:
+                for psm in (7, 6, 13, 8):
+                    for thresh in range(80, 201, 10):
+                        bw = src_img.point(lambda x, t=thresh: 0 if x < t else 255)
+                        text = pytesseract.image_to_string(
+                            bw,
+                            config="--psm %d -c tessedit_char_whitelist="
+                                   "0123456789+-=" % psm,
+                        ).strip()
+                        text = re.sub(r'[^0-9+=]', '', text)
+                        if text:
+                            raw_reads.append(("%s-psm%d" % (src_label, psm), text))
+                        answer = self._solve_math_captcha(text)
+                        if answer is not None:
+                            key = "%s-psm%d-%d" % (src_label, psm, thresh)
+                            candidates[key] = answer
 
-            if not guesses:
-                print("    \033[1;31mNo valid OCR guesses.\033[0m", flush=True)
-                print("\033[1;36m└──────────────────────────────────────────────────────────────────┘\033[0m", flush=True)
+            if not candidates:
+                print("    \033[1;31mCould not parse math expression.\033[0m", flush=True)
+                # Show first 10 raw OCR outputs for diagnosis
+                seen = set()
+                shown = 0
+                for src, txt in raw_reads:
+                    if txt not in seen and shown < 10:
+                        print(f"      {src}: \033[90m'{txt}'\033[0m", flush=True)
+                        seen.add(txt)
+                        shown += 1
+                print("    \033[1;31mCould not parse math expression (all OCR attempts failed).\033[0m", flush=True)
                 if attempt % 5 == 0:
                     await self.fresh()
                 continue
 
-            guess_counts = Counter(v for v in guesses_by_thresh.values() if v in guesses)
-            sorted_guesses = sorted(guesses, key=lambda g: (-guess_counts.get(g, 0), g))
+            # Use the most common answer among all successful reads
+            answer_counts = Counter(candidates.values())
+            best_answer = answer_counts.most_common(1)[0][0]
+            best_count = answer_counts.most_common(1)[0][1]
 
-            print("    \033[1;34mUsing best guess:\033[0m", flush=True)
-            self.captcha_text = sorted_guesses[0]
-            print(f"      \033[1;35m'{self.captcha_text}'\033[0m (agreed by {guess_counts.get(self.captcha_text, 1)}/{len(guesses_by_thresh)} thresholds)", flush=True)
+            # Show the raw OCR texts that produced this answer
+            raw_examples = set()
+            for src, txt in raw_reads:
+                ans = self._solve_math_captcha(txt)
+                if ans == best_answer:
+                    raw_examples.add(txt)
+            print(f"    \033[1;32mMath captcha solved: '{best_answer}' ({best_count}/{len(candidates)} reads agree)\033[0m", flush=True)
+            for r in sorted(raw_examples)[:3]:
+                print(f"      raw OCR: \033[90m'{r}'\033[0m", flush=True)
             print("\033[1;36m└──────────────────────────────────────────────────────────────────┘\033[0m", flush=True)
+            self.captcha_text = best_answer
             return self.captcha_text
 
         raise RuntimeError("Failed to solve captcha after %d tries" % max_tries)
