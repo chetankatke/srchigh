@@ -87,6 +87,16 @@ class SCISession:
     async def _post(self, url, data=None, **kwargs):
         return await self.client.post(url, data=data, **kwargs)
 
+    async def fresh(self):
+        """Create fresh httpx client and fetch new captcha tokens."""
+        await self.client.aclose()
+        self.client = httpx.AsyncClient(timeout=30.0, headers=dict(CHROME_HEADERS))
+        self.scid = ""
+        self.tok_name = ""
+        self.tok_value = ""
+        self.captcha_text = ""
+        await self.fetch_homepage()
+
     async def fetch_homepage(self):
         """Fetch the judgment-date page and extract captcha tokens."""
         r = await self._get(SCI_BASE + "/judgements-judgement-date/")
@@ -104,8 +114,8 @@ class SCISession:
 
     async def solve_captcha(self, max_tries=30):
         """Download and OCR the securimage-wp captcha (same Securimage engine)."""
-        url = CAPTCHA_URL + self.scid
         for attempt in range(1, max_tries + 1):
+            url = CAPTCHA_URL + self.scid
             print(f"\n\033[1;36m┌── Captcha Attempt {attempt}/{max_tries} ──────────────────────────────────────┐\033[0m", flush=True)
             try:
                 cr = await self._get(url)
@@ -113,9 +123,10 @@ class SCISession:
             except Exception as e:
                 print(f"    \033[1;31mError fetching captcha: {e}\033[0m", flush=True)
                 print("\033[1;36m└──────────────────────────────────────────────────────────────────┘\033[0m", flush=True)
+                if attempt % 5 == 0:
+                    await self.fresh()
                 continue
 
-            # Same enhancement pipeline used in ECourtSession
             enhanced = img.resize((img.width * 2, img.height * 2), Image.Resampling.LANCZOS)
             enhanced = enhanced.filter(ImageFilter.MedianFilter(size=3))
 
@@ -139,29 +150,26 @@ class SCISession:
             if not guesses:
                 print("    \033[1;31mNo valid OCR guesses.\033[0m", flush=True)
                 print("\033[1;36m└──────────────────────────────────────────────────────────────────┘\033[0m", flush=True)
+                if attempt % 5 == 0:
+                    await self.fresh()
                 continue
 
-            # Try most-agreed guess first
             guess_counts = Counter(v for v in guesses_by_thresh.values() if v in guesses)
             sorted_guesses = sorted(guesses, key=lambda g: (-guess_counts.get(g, 0), g))
 
-            print("    \033[1;34mValidating guesses against server:\033[0m", flush=True)
-            for g in sorted_guesses:
-                print(f"      Testing \033[1;35m'{g}'\033[0m ... ", end="", flush=True)
-                # The captcha is validated server-side when we submit the search,
-                # so we can't pre-validate like eCourts. We just use the best guess.
-                pass
-
-            # Use the most-agreed guess
+            print("    \033[1;34mUsing best guess:\033[0m", flush=True)
             self.captcha_text = sorted_guesses[0]
-            print(f"\033[1;32m  Using '{self.captcha_text}'\033[0m", flush=True)
+            print(f"      \033[1;35m'{self.captcha_text}'\033[0m (agreed by {guess_counts.get(self.captcha_text, 1)}/{len(guesses_by_thresh)} thresholds)", flush=True)
             print("\033[1;36m└──────────────────────────────────────────────────────────────────┘\033[0m", flush=True)
             return self.captcha_text
 
         raise RuntimeError("Failed to solve captcha after %d tries" % max_tries)
 
     async def search(self, from_date, to_date):
-        """Search judgments for a date range. Returns list of judgment dicts."""
+        """Search judgments for a date range.
+        Returns (entries_list, captcha_ok) where captcha_ok=False means
+        the captcha was rejected (retry with fresh tokens).
+        """
         params = {
             "action": "get_judgements_judgement_date",
             "from_date": _fmt_date(from_date),
@@ -175,16 +183,17 @@ class SCISession:
         try:
             j = json.loads(r.text)
         except json.JSONDecodeError:
-            return []
+            return [], True
 
         if not j.get("success"):
-            return []
+            return [], False  # captcha rejected
 
         html = j.get("data", "")
         if isinstance(html, dict):
             html = html.get("resultsHtml", "")
 
-        return self._parse_results_table(html)
+        entries = self._parse_results_table(html)
+        return entries, True
 
     def _parse_results_table(self, html):
         """Parse the results HTML table into judgment dicts."""
