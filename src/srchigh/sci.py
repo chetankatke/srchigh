@@ -5,6 +5,7 @@ Handles captcha solving, date-range search, case details, and PDF download.
 
 import io
 import json
+import logging
 import re
 import asyncio
 from collections import Counter
@@ -17,6 +18,8 @@ import pytesseract
 
 from .config import USER_AGENT
 from .parser import parse_entry
+
+log = logging.getLogger(__name__)
 
 SCI_BASE = "https://www.sci.gov.in"
 AJAX_URL = SCI_BASE + "/wp-admin/admin-ajax.php"
@@ -140,19 +143,21 @@ class SCISession:
     def _solve_math_captcha(self, ocr_text):
         """Parse a math expression from OCR and return the computed answer, or None.
 
-        Handles formats like '25+17', '25 + 17', '25+17=', and '25+17=?'.
+        Format is always 'NUM+NUM' or 'NUM-NUM' with numbers 1-10.
+        No equals sign, no question mark.
         """
-        # Strip trailing garbage (=, ?, spaces, non-alphanumeric)
         clean = ocr_text.strip().rstrip("=? \t")
-        # Try to match: digits operator digits
         m = re.match(r'(\d+)\s*([+-])\s*(\d+)', clean)
         if not m:
             return None
         a, op, b = int(m.group(1)), m.group(2), int(m.group(3))
+        # Numbers are 1-10, result must be non-negative
+        if not (1 <= a <= 10 and 1 <= b <= 10):
+            return None
         if op == '+':
             return str(a + b)
         elif op == '-':
-            return str(a - b) if a >= b else None
+            return str(a - b) if a > b else None
         return None
 
     async def solve_captcha(self, max_tries=30):
@@ -173,21 +178,29 @@ class SCISession:
                     await self.fresh()
                 continue
 
+            # Show captcha image on first attempt only
+            if attempt == 1:
+                print("    \033[1;33mCaptcha image:\033[0m", flush=True)
+                print(self._render_captcha_ascii(img), flush=True)
+
             # Upscale + denoise
             enhanced = img.resize((img.width * 2, img.height * 2), Image.Resampling.LANCZOS)
             enhanced = enhanced.filter(ImageFilter.MedianFilter(size=3))
 
+            # Morphological dilation to separate touching characters
+            dilated = enhanced.filter(ImageFilter.MinFilter(size=3))
+
             # Try multiple OCR configurations to read the math expression
             candidates = {}  # answer -> (source_key, count)
             raw_reads = []  # (source_key, raw_text) for diagnosis
-            for src_label, src_img in [("enhanced", enhanced), ("original", img)]:
+            for src_label, src_img in [("dilated", dilated), ("enhanced", enhanced), ("original", img)]:
                 for psm in (7, 6, 13, 8):
                     for thresh in range(80, 201, 10):
                         bw = src_img.point(lambda x, t=thresh: 0 if x < t else 255)
                         text = pytesseract.image_to_string(
                             bw,
                             config="--psm %d -c tessedit_char_whitelist="
-                                   "0123456789+-=" % psm,
+                                   "0123456789+-" % psm,
                         ).strip()
                         text = re.sub(r'[^0-9+=]', '', text)
                         if text:
@@ -253,6 +266,15 @@ class SCISession:
             return [], True
 
         if not j.get("success"):
+            err_data = j.get("data", "")
+            if isinstance(err_data, str):
+                try:
+                    err_msg = json.loads(err_data).get("message", err_data[:200])
+                except (json.JSONDecodeError, AttributeError):
+                    err_msg = err_data[:200]
+            else:
+                err_msg = str(err_data)[:200]
+            log.error("    Server rejected: %s" % err_msg)
             return [], False  # captcha rejected
 
         html = j.get("data", "")
