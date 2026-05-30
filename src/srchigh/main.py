@@ -35,6 +35,7 @@ from .session import ECourtSession, httpx
 from . import db
 from .download import download_from_db
 from . import __version__
+from .sci import SCISession, _split_date_range, _parse_sci_date, _month_range, _fmt_date
 
 
 def parse_args():
@@ -49,6 +50,9 @@ def parse_args():
         "citation_year": "", "citation_vol": "", "citation_supl": "",
         "citation_page": "", "ncn": "", "neu_cit_year": "",
         "neu_no": "", "sel_lang": "",
+        "sci": False,
+        "from_date_sci": "", "to_date_sci": "",
+        "month_sci": "", "year_sci": "",
     }
     pos = 0
     i = 0
@@ -80,6 +84,16 @@ def parse_args():
             p["from_date"] = args[i + 1]; i += 2
         elif a == "--to" and i + 1 < len(args):
             p["to_date"] = args[i + 1]; i += 2
+        elif a == "--sci":
+            p["sci"] = True; i += 1
+        elif a == "--from" and i + 1 < len(args):
+            p["from_date_sci"] = args[i + 1]; i += 2
+        elif a == "--to" and i + 1 < len(args):
+            p["to_date_sci"] = args[i + 1]; i += 2
+        elif a == "--month" and i + 1 < len(args):
+            p["month_sci"] = args[i + 1]; i += 2
+        elif a == "--year" and i + 1 < len(args):
+            p["year_sci"] = args[i + 1]; i += 2
         elif a == "--scr":
             p["scr"] = True; i += 1
         elif a == "--citation-year" and i + 1 < len(args):
@@ -124,13 +138,14 @@ def parse_args():
             pos += 1
             i += 1
 
-    if not p["search"] and not p["download_db"] and not p["status"] and not p["export_csv"]:
+    if not p["search"] and not p["download_db"] and not p["status"] and not p["export_csv"] and not p.get("sci"):
         court_list = ", ".join(sorted(COURT_NAMES.keys()))
         print("Usage: python3 main.py <search_term> [count] [options]")
         print("")
         print("  Search sources:")
         print("    (default)            High Courts via eCourts portal")
         print("    --scr                Supreme Court Reports (SCR) portal")
+        print("    --sci                SCI Judgment Date portal")
         print("")
         print("  Search options:")
         print("    --mode PHRASE|ANY|ALL   Search mode (default: PHRASE)")
@@ -155,6 +170,13 @@ def parse_args():
         print("    --neu-cit-year YYYY     Neutral citation year")
         print("    --neu-no N              Neutral citation number")
         print("    --sel-lang CODE         Language")
+        print("")
+        print("  SCI options:")
+        print("    --from DATE             Start date DD-MM-YYYY")
+        print("    --to DATE               End date DD-MM-YYYY")
+        print("    --month MM-YYYY         Month to download")
+        print("    --year YYYY             Year to download")
+        print("    (max 30-day range per request, auto-split into chunks)")
         print("")
         print("  Output options:")
         print("    --no-download           Skip PDF download, store in DB only")
@@ -417,6 +439,112 @@ async def run_search():
     print("=" * 60)
 
 
+def _resolve_sci_dates():
+    """Resolve SCI date parameters into (from_date, to_date) date objects."""
+    from datetime import date as dt_date
+    if P.get("from_date_sci") and P.get("to_date_sci"):
+        return _parse_sci_date(P["from_date_sci"]), _parse_sci_date(P["to_date_sci"])
+    if P.get("month_sci"):
+        parts = P["month_sci"].split("-")
+        y, m = int(parts[1]), int(parts[0])
+        return _month_range(y, m)
+    if P.get("year_sci"):
+        y = int(P["year_sci"])
+        return dt_date(y, 1, 1), dt_date(y, 12, 31)
+    return None, None
+
+
+async def run_sci_search():
+    """Search SCI by date range, download PDFs organized by year/month."""
+    from datetime import date as dt_date
+
+    await db.init_db()
+
+    from_dt, to_dt = _resolve_sci_dates()
+    if not from_dt or not to_dt:
+        log.error("SCI mode requires --from/--to, --month, or --year")
+        return
+    if from_dt > to_dt:
+        log.error("from_date must be before to_date")
+        return
+
+    print("=" * 60)
+    print("  srchigh — SCI Judgment Date")
+    print("  Range: %s  →  %s" % (_fmt_date(from_dt), _fmt_date(to_dt)))
+    base_out = os.path.expanduser("~/myJud/sci")
+    print("  Output: %s/" % base_out)
+    print("=" * 60)
+
+    chunks = _split_date_range(from_dt, to_dt)
+    print("\n  Splitting into %d chunk(s) (max %d days each)" % (len(chunks), 30))
+
+    total_downloaded = 0
+    total_found = 0
+
+    for chunk_idx, (chunk_from, chunk_to) in enumerate(chunks, 1):
+        print("\n") + "─" * 50
+        print("  Chunk %d/%d: %s  →  %s" % (chunk_idx, len(chunks),
+                                               _fmt_date(chunk_from), _fmt_date(chunk_to)))
+
+        ec = SCISession()
+        print("  [1] Fetching homepage...")
+        await ec.fetch_homepage()
+        print("  [2] Solving captcha...")
+        await ec.solve_captcha()
+        print("  [3] Searching...")
+        entries = await ec.search(chunk_from, chunk_to)
+        if not entries:
+            print("  No results for this range.")
+            await ec.close()
+            continue
+
+        total_found += len(entries)
+        print("  Found %d judgment(s)" % len(entries))
+
+        for idx, entry in enumerate(entries, 1):
+            diary_no = entry.get("diary_no", "")
+            diary_year = entry.get("diary_year", "")
+            label = entry.get("case_no", "") or entry.get("diary_no", "")
+            dec_date = entry.get("decision_date", "")
+            print("\n  [%d/%d] %s (%s)" % (idx, len(entries), label, dec_date))
+
+            # Parse decision date for folder organization
+            try:
+                d = _parse_sci_date(dec_date) if dec_date else chunk_from
+            except (ValueError, IndexError):
+                d = chunk_from
+            month_dir = os.path.join(base_out, str(d.year), "%02d" % d.month)
+
+            pdf_path = os.path.join(month_dir, "%s_%s.pdf" % (dec_date.replace("-", ""), diary_no))
+
+            # Skip if already downloaded
+            if os.path.exists(pdf_path) and os.path.getsize(pdf_path) > 1000:
+                print("    Already exists, skipping")
+                continue
+
+            print("    Fetching details...")
+            details = await ec.get_case_details(diary_no, diary_year)
+            pdf_url = ec._extract_pdf_url(details) if details else None
+
+            if pdf_url:
+                print("    Downloading PDF...")
+                sz = await ec.download_pdf(pdf_url, pdf_path)
+                if sz > 1000:
+                    print("    OK (%d bytes)" % sz)
+                    total_downloaded += 1
+                else:
+                    print("    Failed (empty or invalid)")
+            else:
+                print("    No PDF URL found in details")
+
+        await ec.close()
+
+    print("\n" + "=" * 60)
+    print("  Done! %d PDF(s) downloaded to %s/" % (total_downloaded, base_out))
+    print("  Total judgments found: %d" % total_found)
+    print("=" * 60)
+
+
 async def run_download_db():
     await db.init_db()
     print("=" * 60)
@@ -474,7 +602,9 @@ async def run_cli():
     P = parse_args()
     P = apply_config_to_params(P)
 
-    if P["status"]:
+    if P.get("sci"):
+        await run_sci_search()
+    elif P["status"]:
         await run_status()
     elif P["export_csv"]:
         await run_export_csv()

@@ -20,6 +20,7 @@ USER_AGENT = (
 SOURCE_LABELS = {
     "ecourts": "High Court (eCourts)",
     "scr": "Supreme Court (SCR)",
+    "sci": "SCI Judgment Date",
 }
 
 # Numeric state_code → High Court name
