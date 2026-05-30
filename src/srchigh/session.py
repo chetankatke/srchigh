@@ -1,5 +1,5 @@
 """
-ECourtSession — async HTTP session with eCourts server using httpx.
+ECourtSession — async HTTP session with eCourts / SCR server using httpx.
 Handles captcha solving, search, and PDF URL retrieval.
 
 Chrome 120+ TLS fingerprint headers for stealth.
@@ -9,12 +9,13 @@ import io
 import json
 import re
 import asyncio
+from urllib.parse import urlparse
 
 import httpx
 from PIL import Image
 import pytesseract
 
-from .config import BASE_URL, USER_AGENT
+from .config import USER_AGENT
 from .parser import parse_entry, parse_results_page
 
 
@@ -37,7 +38,9 @@ CHROME_HEADERS = {
 
 
 class ECourtSession:
-    def __init__(self):
+    def __init__(self, base_url=None, fcourt_type="2"):
+        self.base_url = base_url or "https://judgments.ecourts.gov.in/pdfsearch/"
+        self.fcourt_type = fcourt_type
         self.client = httpx.AsyncClient(timeout=30.0, headers=dict(CHROME_HEADERS))
         self.app_token = ""
         self.captcha_text = ""
@@ -48,16 +51,13 @@ class ECourtSession:
         self.app_token = ""
 
     async def _get(self, path, **kwargs):
-        return await self.client.get(BASE_URL + path, **kwargs)
+        return await self.client.get(self.base_url + path, **kwargs)
 
     async def _post(self, path, data=None, **kwargs):
-        return await self.client.post(BASE_URL + path, data=data, **kwargs)
+        return await self.client.post(self.base_url + path, data=data, **kwargs)
 
     def _render_image_to_ascii(self, img, width=60):
-        try:
-            resample = Image.Resampling.BILINEAR
-        except AttributeError:
-            resample = Image.BILINEAR
+        resample = Image.Resampling.BILINEAR
 
         w_original, h_original = img.size
         aspect_ratio = h_original / w_original
@@ -85,7 +85,7 @@ class ECourtSession:
         return border + "\n" + "\n".join(lines) + "\n" + bottom_border
 
     async def solve_captcha(self, search_text="test", search_opt="PHRASE",
-                            court_type="2", max_tries=30):
+                            court_type=None, max_tries=30):
         for attempt in range(1, max_tries + 1):
             print(f"\n\033[1;36m┌── Captcha Attempt {attempt}/{max_tries} ──────────────────────────────────────┐\033[0m", flush=True)
             try:
@@ -136,7 +136,7 @@ class ECourtSession:
                         "captcha": guess,
                         "search_text": search_text,
                         "search_opt": search_opt,
-                        "fcourt_type": court_type,
+                        "fcourt_type": court_type or self.fcourt_type,
                         "ajax_req": "true",
                         "app_token": self.app_token,
                     })
@@ -164,7 +164,7 @@ class ECourtSession:
         import urllib.parse
         url = ("?p=pdf_search/home&text=" + urllib.parse.quote(search_term) +
                "&captcha=" + c + "&search_opt=" + mode +
-               "&fcourt_type=2&app_token=" + self.app_token)
+               "&fcourt_type=%s&app_token=" % self.fcourt_type + self.app_token)
         r = await self._get(url)
         m = re.search(r'app_token=([^"&\s<>]+)', r.text)
         if m:
@@ -173,7 +173,7 @@ class ECourtSession:
 
     async def get_results(self, search_term, page=0, page_size=25, mode="PHRASE",
                           state_code="", judge_name="", from_date="", to_date="",
-                          proximity=""):
+                          proximity="", **extra_params):
         fields = [
             "state_code", "dist_code", "judge_name", "judge_arr",
             "act_txt", "section_txt", "case_no", "case_year", "pet_res",
@@ -187,7 +187,7 @@ class ECourtSession:
             "search_txt": "",
             "search_txt1": search_term,
             "search_opt": mode,
-            "fcourt_type": "2",
+            "fcourt_type": self.fcourt_type,
             "state_code": state_code,
             "judge_name": judge_name,
             "from_date": from_date,
@@ -200,6 +200,7 @@ class ECourtSession:
             "ajax_req": "true",
             "app_token": self.app_token,
         })
+        dt.update(extra_params)
         r = await self._post("?p=pdf_search/home", data=dt)
         if r.status_code != 200:
             return [], 0
@@ -221,7 +222,7 @@ class ECourtSession:
                 "lang_flg": "",
                 "path": path,
                 "citation_year": entry.get("citation_year", ""),
-                "fcourt_type": "2",
+                "fcourt_type": self.fcourt_type,
                 "file_type": "",
                 "nc_display": "",
                 "ajax_req": "true",
@@ -237,10 +238,15 @@ class ECourtSession:
             if out:
                 if out.startswith("http"):
                     return out
-                elif out.startswith("/"):
-                    return "https://judgments.ecourts.gov.in" + out
                 else:
-                    return "https://judgments.ecourts.gov.in/" + out
+                    # Extract origin from self.base_url (e.g. "https://scr.sci.gov.in")
+                    # so relative paths resolve to the right domain per source
+                    parsed = urlparse(self.base_url)
+                    origin = "%s://%s" % (parsed.scheme, parsed.netloc)
+                    if out.startswith("/"):
+                        return origin + out
+                    else:
+                        return origin + "/" + out
         return None
 
     async def download_pdf(self, url, filename):

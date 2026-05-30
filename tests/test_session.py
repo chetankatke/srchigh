@@ -76,11 +76,11 @@ class TestCaptchaSolving:
 class TestSearch:
     """Full search flow — requires solved captcha."""
 
-    @pytest.fixture(scope="class")
+    @pytest.fixture(scope="function")
     def ec(self):
         from srchigh.session import ECourtSession
         ec = ECourtSession()
-        return ec
+        yield ec
 
     @pytest.mark.asyncio
     async def test_results_page_loads(self, ec):
@@ -158,11 +158,11 @@ class TestSearch:
 class TestPdfDownload:
     """PDF download — requires solved captcha and search results."""
 
-    @pytest.fixture(scope="class")
+    @pytest.fixture(scope="function")
     def ec(self):
         from srchigh.session import ECourtSession
         ec = ECourtSession()
-        return ec
+        yield ec
 
     @pytest.mark.asyncio
     async def test_get_pdf_url_returns_url(self, ec):

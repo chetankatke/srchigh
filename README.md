@@ -1,8 +1,8 @@
-# srchigh — eCourts India High Court Judgments Scraper
+# srchigh — Indian Court Judgments Scraper
 
-**Search, filter, export metadata, and download judgments from all Indian High Courts.**
+**Search, filter, export metadata, and download judgments from Indian High Courts (eCourts) and the Supreme Court (SCR).**
 
-Reverse-engineers the [eCourts PDF Search](https://judgments.ecourts.gov.in/pdfsearch/) portal to provide a programmatic interface for bulk downloading High Court judgments. Handles captcha solving, session rotation, pagination, and rate-limiting automatically.
+Reverse-engineers the [eCourts PDF Search](https://judgments.ecourts.gov.in/pdfsearch/) and [SCR Search](https://scr.sci.gov.in/scrsearch/) portals to provide a programmatic interface for bulk downloading Indian court judgments. Both sites run the same PHP MVC software stack — same Securimage captcha, same DataTable format — so a single codebase handles both. Handles captcha solving, session rotation, pagination, and rate-limiting automatically.
 
 ---
 
@@ -14,7 +14,8 @@ Reverse-engineers the [eCourts PDF Search](https://judgments.ecourts.gov.in/pdfs
 - [Quick Start](#quick-start)
 - [Usage Guide](#usage-guide)
   - [Search Modes](#search-modes)
-  - [Court Filtering](#court-filtering)
+  - [Court Filtering (High Courts)](#court-filtering-high-courts)
+  - [SCR — Supreme Court Reports](#scr--supreme-court-reports)
   - [Pagination](#pagination)
   - [CSV Export](#csv-export)
   - [Batch Download from CSV](#batch-download-from-csv)
@@ -90,7 +91,7 @@ The eCourts portal is a PHP MVC application with server-side DataTables. Judgmen
 |---|---|---|
 | **Python 3.9+** | Runtime | `brew install python` / `apt install python3` |
 | **Tesseract OCR** | Captcha solving | `brew install tesseract` / `apt install tesseract-ocr` |
-| **Pip modules** | All functionality | `pip3 install -r requirements.txt` |
+| **Pip modules** | All functionality | `pip3 install -e "."` |
 
 ### Installing Tesseract
 
@@ -127,7 +128,7 @@ tesseract --version
 ```bash
 git clone <repo-url> ~/srchigh
 cd ~/srchigh
-pip3 install -r requirements.txt
+pip3 install -e "."
 python3 main.py "divorce" 5
 ```
 
@@ -135,7 +136,7 @@ python3 main.py "divorce" 5
 
 ```bash
 cd ~/srchigh
-pip3 install -e .
+pip3 install -e "."
 srchigh "divorce" 5 --court bombay
 ```
 
@@ -159,23 +160,28 @@ bash install.sh
 ## Quick Start
 
 ```bash
-# Search and download 5 "divorce" judgments
+# Search and download 5 "divorce" judgments (High Courts)
 srchigh "divorce" 5
 
-# Search + court filter + download
+# High Court + court filter + download
 srchigh "divorce" 5 --court bombay
 
-# Export ALL results as CSV (no PDFs)
-srchigh "divorce" --court bombay --all --csv --no-download
+# Supreme Court (SCR) search
+srchigh "divorce" 5 --scr
 
-# Download PDFs from a previously saved CSV
-srchigh --from-csv ~/myJud/divorce
+# SCR with citation filter
+srchigh "2024 AIR 1" 5 --scr --citation-year 2024 --citation-vol 1
+
+# Export ALL High Court results as CSV (no PDFs)
+srchigh "divorce" --court bombay --all --csv --no-download
 
 # Get help
 srchigh
 ```
 
-**Output** lands in `~/myJud/<search_term>/` by default (e.g., `~/myJud/divorce/`).
+**Output** lands in:
+- High Courts (default): `~/myJud/<search_term>/` (e.g., `~/myJud/divorce/`)
+- SCR (`--scr`): `~/myJud/scr/<search_term>/` (e.g., `~/myJud/scr/divorce/`)
 
 ---
 
@@ -190,21 +196,42 @@ Positional:
   search_term           Keyword to search (required)
   count                 Number of results per page (default: 5)
 
-Options:
-  --court NAME          Filter by High Court
-  --mode MODE           Search mode: PHRASE | ANY | ALL (default: PHRASE)
+Search sources:
+  (default)             High Courts via eCourts portal
+  --scr                 Supreme Court Reports (SCR) portal
+
+Search options:
+  --mode PHRASE|ANY|ALL Search mode (default: PHRASE)
   --proximity N         Word proximity for ALL mode (20-100, default: 40)
   --page N              Page number (default: 0)
   --pages M:N           Page range (e.g. 0:10)
   --all                 Fetch ALL matching results (paginates automatically)
-  --csv                 Export results as CSV
-  --no-download         Skip PDF download, show/list only
-  --from-csv DIR        Download PDFs from a saved CSV
+
+High Court filters:
+  --court NAME          Filter by High Court
   --state CODE          Filter by state code (numeric)
   --judge NAME          Filter by judge name
   --from DATE           Start date DD-MM-YYYY
   --to DATE             End date DD-MM-YYYY
-  --out DIR             Output directory (default: ~/myJud/<search_term>)
+
+SCR filters:
+  --citation-year YYYY  Citation year
+  --citation-vol N      Citation volume
+  --citation-supl SUPPL Citation supplement
+  --citation-page N     Citation page
+  --ncn CODE            Neutral citation number
+  --neu-cit-year YYYY   Neutral citation year
+  --neu-no N            Neutral citation number
+  --sel-lang CODE       Language
+
+Output options:
+  --no-download         Skip PDF download, store in DB only
+  --download-db         Download pending PDFs from DB
+  --status              Show DB status for a search term
+  --export-csv PATH     Export DB results to CSV
+  --out DIR             Output directory
+    (default HC: ~/myJud/<search_term>)
+    (default SCR: ~/myJud/scr/<search_term>)
 ```
 
 ### Search Modes
@@ -233,7 +260,7 @@ srchigh "divorce custody" 5 --mode all --proximity 20
 
 **Proximity** controls how close the words must be in the judgment text. Values: 20, 40, 60, 80, 100. Lower = closer. Only applies to `--mode ALL`.
 
-### Court Filtering
+### Court Filtering (High Courts)
 
 Filter by High Court using the `--court` flag. This uses the server-side numeric state codes discovered by reverse-engineering the court filter sidebar.
 
@@ -256,6 +283,41 @@ punjab & haryana, rajasthan, sikkim, telangana, tripura, uttarakhand
 ```
 
 The matching is case-insensitive and substring-based (`bombay` matches all Bombay benches).
+
+### SCR — Supreme Court Reports
+
+Search the Supreme Court Reports (SCR) portal at `https://scr.sci.gov.in/scrsearch/` using the `--scr` flag. The SCR portal runs the same software stack as the High Court eCourts portal, so all captcha solving, session rotation, and pagination work identically.
+
+```bash
+# Basic SCR search
+srchigh "divorce" 5 --scr
+
+# SCR with citation filters
+srchigh "2024 AIR 1" 5 --scr --citation-year 2024 --citation-vol 1
+
+# SCR with neutral citation
+srchigh "criminal" 10 --scr --neu-cit-year 2023 --neu-no 1234
+
+# SCR — export all metadata
+srchigh "divorce" --scr --all --no-download
+```
+
+**SCR-specific fields:**
+
+| Flag | Description |
+|---|---|
+| `--citation-year YYYY` | Filter by citation year |
+| `--citation-vol N` | Filter by citation volume |
+| `--citation-supl SUPPL` | Filter by citation supplement |
+| `--citation-page N` | Filter by citation page |
+| `--ncn CODE` | Neutral citation number (language code) |
+| `--neu-cit-year YYYY` | Neutral citation year |
+| `--neu-no N` | Neutral citation number |
+| `--sel-lang CODE` | Language filter |
+
+**Output directory:** SCR downloads go to `~/myJud/scr/<search_term>/` to avoid mixing with High Court PDFs.
+
+---
 
 ### Pagination
 
@@ -360,25 +422,24 @@ Edit this file to set persistent preferences. For example, setting `"default_cou
 ```
 ~/srchigh/
 ├── src/srchigh/             # ← pip-installable Python package
-│   ├── __init__.py
-│   ├── config.py            # Constants, court codes, first-run detection
-│   ├── session.py           # ECourtSession — captcha, search, PDF download
+│   ├── __init__.py          # Version
+│   ├── config.py            # Constants, court codes, SCR URLs, first-run detection
+│   ├── session.py           # ECourtSession — captcha, search, PDF download (HC & SCR)
 │   ├── parser.py            # CSS-selector-based HTML parsing (parsel)
 │   ├── export.py            # CSV read/write
-│   ├── download.py          # Batch download from saved CSV
+│   ├── download.py          # Batch download (source-aware)
+│   ├── db.py                # SQLite storage with source column
 │   └── main.py              # CLI entry point + arg parsing
 ├── main.py                  # Convenience runner (python3 main.py)
-├── setup.py                 # pip install configuration
-├── pyproject.toml           # Modern Python packaging
-├── requirements.txt         # Dependencies
+├── pyproject.toml           # Python packaging (single source)
 ├── Makefile                 # make install / make test / make binary
 ├── install.sh               # One-command install script
 ├── README.md                # This file
 └── tests/                   # 74+ tests (pytest)
-    ├── conftest.py          # Test fixtures with realistic HTML samples
+    ├── conftest.py          # Test fixtures + --network flag logic
     ├── test_config.py       # Court code mappings (8 tests)
     ├── test_parser.py       # HTML parsing (23 tests)
-    ├── test_export.py       # CSV read/write (10 tests)
+    ├── test_export.py       # CSV/DB read/write (10 tests)
     ├── test_session.py      # Integration tests — real server (10 tests)
     └── test_smoke.py        # CLI args, imports, flags (20 tests)
 ```
@@ -468,6 +529,20 @@ srchigh "divorce" 10 --court bombay
 # → 10 PDFs in ~/myJud/divorce/
 ```
 
+### Quick SCR batch
+
+```bash
+srchigh "divorce" 10 --scr
+# → 10 PDFs in ~/myJud/scr/divorce/
+```
+
+### SCR with citation lookup
+
+```bash
+srchigh "2024 AIR 1" 5 --scr --citation-year 2024 --citation-vol 1
+# → SCR judgment with specific citation in ~/myJud/scr/2024_air_1/
+```
+
 ### Large-scale metadata export
 
 ```bash
@@ -550,8 +625,7 @@ Temporary PDF URLs expire. The script retries automatically, but if it consisten
 
 ```bash
 # macOS system Python — use --user flag
-pip3 install --user -r requirements.txt
-pip3 install --user -e .
+pip3 install --user -e "."
 
 # Or use python3 main.py directly (no pip install needed)
 python3 main.py "divorce" 5
@@ -632,22 +706,21 @@ The binary bundles Python, all pip dependencies, and the application code into a
 
 ### Dependencies
 
-| Package | Purpose | Alternative |
-|---|---|---|
-| `requests` | HTTP client | `httpx`, `aiohttp` |
-| `Pillow` | Image processing for captcha | `opencv-python` |
-| `pytesseract` | OCR engine binding | — |
-| `parsel` | CSS/XPath selectors for HTML parsing | `BeautifulSoup`, `lxml` |
-| `cssselect` | CSS selector → XPath translation | (parsel dependency) |
+| Package | Purpose |
+|---|---|
+| `httpx` | Async HTTP client |
+| `aiosqlite` | Async SQLite |
+| `Pillow` | Image processing for captcha |
+| `pytesseract` | OCR engine binding |
+| `parsel` | CSS/XPath selectors for HTML parsing |
 
 ### Anti-bot measures handled
 
-1. **CAPTCHA** — Securimage solved via Tesseract OCR
+1. **CAPTCHA** — Securimage solved via Tesseract OCR (same on both portals)
 2. **CSRF tokens** — `app_token` extracted from every response, sent with every request
-3. **Session cookies** — `JUDGEMENTSSEARCH_SESSID` maintained via `requests.Session()`
+3. **Session cookies** — PHP session maintained via `httpx.AsyncClient`
 4. **Rate limiting** — Session rotation every 20 downloads
 5. **TLS fingerprinting** — Chrome 120+ headers (`Sec-Ch-Ua`, `Sec-Fetch-*`)
-6. **Optional Scrapling** — Even better stealth if `scrapling` is installed
 
 ## Disclaimer
 

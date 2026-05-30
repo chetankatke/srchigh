@@ -5,7 +5,6 @@ Stores judgment records persistently instead of CSV.
 
 import aiosqlite
 import os
-import json
 from datetime import datetime
 
 DB_PATH = os.path.join(os.path.expanduser("~"), ".config", "srchigh", "judgments.db")
@@ -22,6 +21,7 @@ CREATE TABLE IF NOT EXISTS judgments (
     disposal_nature TEXT,
     pdf_path        TEXT,
     search_term     TEXT,
+    source          TEXT DEFAULT 'ecourts',
     downloaded      INTEGER DEFAULT 0,
     file_size       INTEGER DEFAULT 0,
     created_at      TEXT,
@@ -61,16 +61,25 @@ async def init_db():
         await db.executescript(CREATE_TABLE)
         await db.executescript(CREATE_SEARCHES)
         await db.executescript(CREATE_DOWNLOADS_LOG)
+        # Migration: add source column if missing (existing DBs)
+        try:
+            await db.execute("ALTER TABLE judgments ADD COLUMN source TEXT DEFAULT 'ecourts'")
+        except aiosqlite.OperationalError:
+            pass  # column already exists
+        try:
+            await db.execute("ALTER TABLE searches ADD COLUMN source TEXT DEFAULT 'ecourts'")
+        except aiosqlite.OperationalError:
+            pass
         await db.commit()
 
 
-async def insert_judgment(entry, search_term="", downloaded=False, file_size=0):
+async def insert_judgment(entry, search_term="", downloaded=False, file_size=0, source="ecourts"):
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("""
             INSERT OR REPLACE INTO judgments
             (cnr, case_title, court, judge, reg_date, decision_date,
-             disposal_nature, pdf_path, search_term, downloaded, file_size, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             disposal_nature, pdf_path, search_term, source, downloaded, file_size, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             entry.get("cnr"),
             entry.get("case_title"),
@@ -81,6 +90,7 @@ async def insert_judgment(entry, search_term="", downloaded=False, file_size=0):
             entry.get("disposal_nature"),
             entry.get("path"),
             search_term,
+            source,
             1 if downloaded else 0,
             file_size,
             datetime.utcnow().isoformat(),
@@ -88,7 +98,7 @@ async def insert_judgment(entry, search_term="", downloaded=False, file_size=0):
         await db.commit()
 
 
-async def insert_judgments_batch(entries, search_term=""):
+async def insert_judgments_batch(entries, search_term="", source="ecourts"):
     if not entries:
         return
     rows = [
@@ -102,6 +112,7 @@ async def insert_judgments_batch(entries, search_term=""):
             e.get("disposal_nature"),
             e.get("path"),
             search_term,
+            source,
             0,
             0,
             datetime.utcnow().isoformat(),
@@ -112,8 +123,8 @@ async def insert_judgments_batch(entries, search_term=""):
         await db.executemany("""
             INSERT OR IGNORE INTO judgments
             (cnr, case_title, court, judge, reg_date, decision_date,
-             disposal_nature, pdf_path, search_term, downloaded, file_size, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             disposal_nature, pdf_path, search_term, source, downloaded, file_size, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, rows)
         await db.commit()
 
@@ -205,31 +216,14 @@ async def log_download(cnr, pdf_path, search_term, success, file_size=0, session
         await db.commit()
 
 
-async def search_judgments(query, court="", limit=50):
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        sql = "SELECT * FROM judgments WHERE 1=1"
-        args = []
-        if query:
-            sql += " AND (cnr LIKE ? OR case_title LIKE ? OR judge LIKE ?)"
-            q = f"%{query}%"
-            args.extend([q, q, q])
-        if court:
-            sql += " AND court LIKE ?"
-            args.append(f"%{court}%")
-        sql += " ORDER BY created_at DESC LIMIT ?"
-        args.append(limit)
-        async with db.execute(sql, args) as cur:
-            rows = await cur.fetchall()
-            return [dict(r) for r in rows]
-
 
 async def export_to_csv(search_term, out_path):
     rows = await get_all_judgments(search_term)
     if not rows:
         return None
     headers = ["cnr", "case_title", "court", "judge", "reg_date",
-               "decision_date", "disposal_nature", "pdf_path", "downloaded"]
+               "decision_date", "disposal_nature", "pdf_path",
+               "source", "downloaded"]
     import csv
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     with open(out_path, "w", newline="", encoding="utf-8") as f:

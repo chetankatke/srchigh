@@ -169,32 +169,6 @@ class TestExportToCsv:
             db.DB_PATH = old_path
 
 
-class TestSearchJudgments:
-    @pytest.mark.asyncio
-    async def test_search_by_cnr(self, sample_entries, tmp_path):
-        old_path = db.DB_PATH
-        db.DB_PATH = str(tmp_path / "test.db")
-        try:
-            await db.init_db()
-            await db.insert_judgments_batch(sample_entries, "search_test")
-            results = await db.search_judgments("HCBM")
-            assert len(results) == 1
-            assert results[0]["cnr"] == "HCBM0000001"
-        finally:
-            db.DB_PATH = old_path
-
-    @pytest.mark.asyncio
-    async def test_search_by_case_title(self, sample_entries, tmp_path):
-        old_path = db.DB_PATH
-        db.DB_PATH = str(tmp_path / "test.db")
-        try:
-            await db.init_db()
-            await db.insert_judgments_batch(sample_entries, "title_test")
-            results = await db.search_judgments("Union")
-            assert len(results) == 1
-            assert results[0]["case_title"] == "Case B vs Union"
-        finally:
-            db.DB_PATH = old_path
 
 
 class TestStats:

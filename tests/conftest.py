@@ -8,6 +8,24 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 import pytest
 
 
+def pytest_addoption(parser):
+    parser.addoption(
+        "--network",
+        action="store_true",
+        default=False,
+        help="Run integration tests that connect to the eCourts server",
+    )
+
+
+def pytest_collection_modifyitems(config, items):
+    if config.getoption("--network"):
+        return  # --network given: run all tests
+    skip_network = pytest.mark.skip(reason="need --network flag to run")
+    for item in items:
+        if item.get_closest_marker("network"):
+            item.add_marker(skip_network)
+
+
 # ── Sample HTML snippets (exact format from real DataTable response) ──
 
 SAMPLE_ENTRY_COMPLETE = (

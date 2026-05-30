@@ -27,13 +27,14 @@ log = logging.getLogger(__name__)
 
 from .config import (
     COURT_NAMES, MODE_LABELS, DOWNLOADS_PER_SESSION,
-    ALL_PAGE_SIZE, DEFAULT_PAGE_SIZE, MAX_PAGES_ALL, BASE_URL,
+    ALL_PAGE_SIZE, DEFAULT_PAGE_SIZE, MAX_PAGES_ALL, BASE_URL, SCR_BASE_URL,
     is_first_run, first_run_setup, apply_config_to_params,
     mark_first_run_done,
 )
-from .session import ECourtSession
+from .session import ECourtSession, httpx
 from . import db
 from .download import download_from_db
+from . import __version__
 
 
 def parse_args():
@@ -44,6 +45,10 @@ def parse_args():
         "from_date": "", "to_date": "", "out": "",
         "court": "", "all": False, "no_dl": False,
         "download_db": False, "status": False, "export_csv": "",
+        "scr": False,
+        "citation_year": "", "citation_vol": "", "citation_supl": "",
+        "citation_page": "", "ncn": "", "neu_cit_year": "",
+        "neu_no": "", "sel_lang": "",
     }
     pos = 0
     i = 0
@@ -75,6 +80,24 @@ def parse_args():
             p["from_date"] = args[i + 1]; i += 2
         elif a == "--to" and i + 1 < len(args):
             p["to_date"] = args[i + 1]; i += 2
+        elif a == "--scr":
+            p["scr"] = True; i += 1
+        elif a == "--citation-year" and i + 1 < len(args):
+            p["citation_year"] = args[i + 1]; i += 2
+        elif a == "--citation-vol" and i + 1 < len(args):
+            p["citation_vol"] = args[i + 1]; i += 2
+        elif a == "--citation-supl" and i + 1 < len(args):
+            p["citation_supl"] = args[i + 1]; i += 2
+        elif a == "--citation-page" and i + 1 < len(args):
+            p["citation_page"] = args[i + 1]; i += 2
+        elif a == "--ncn" and i + 1 < len(args):
+            p["ncn"] = args[i + 1]; i += 2
+        elif a == "--neu-cit-year" and i + 1 < len(args):
+            p["neu_cit_year"] = args[i + 1]; i += 2
+        elif a == "--neu-no" and i + 1 < len(args):
+            p["neu_no"] = args[i + 1]; i += 2
+        elif a == "--sel-lang" and i + 1 < len(args):
+            p["sel_lang"] = args[i + 1]; i += 2
         elif a == "--all":
             p["all"] = True; i += 1
         elif a == "--no-download":
@@ -87,6 +110,9 @@ def parse_args():
             p["export_csv"] = args[i + 1]; i += 2
         elif a == "--out" and i + 1 < len(args):
             p["out"] = args[i + 1]; i += 2
+        elif a == "--version":
+            print("srchigh v%s" % __version__)
+            sys.exit(0)
         elif a.startswith("--"):
             log.error("Unknown option: %s" % a)
             sys.exit(1)
@@ -99,29 +125,51 @@ def parse_args():
             i += 1
 
     if not p["search"] and not p["download_db"] and not p["status"] and not p["export_csv"]:
+        court_list = ", ".join(sorted(COURT_NAMES.keys()))
         print("Usage: python3 main.py <search_term> [count] [options]")
-        print("  --court NAME            Filter by High Court (e.g. bombay, delhi)")
-        print("  --mode PHRASE|ANY|ALL   Search mode (default: PHRASE)")
-        print("  --proximity N           Word proximity for ALL mode (20-100)")
-        print("  --page N                Page number (default: 0)")
-        print("  --pages M:N             Page range")
-        print("  --all                   Download ALL matching results")
-        print("  --no-download           Skip PDF download, store in DB only")
-        print("  --download-db           Download pending PDFs from DB")
-        print("  --status                Show DB status for a search term")
-        print("  --export-csv PATH       Export DB results to CSV")
-        print("  --state CODE            Filter by state code")
-        print("  --judge NAME            Filter by judge name")
-        print("  --from DATE             Start date DD-MM-YYYY")
-        print("  --to DATE               End date DD-MM-YYYY")
-        print("  --out DIR               Output directory")
         print("")
-        print("Available courts: " + ", ".join(sorted(COURT_NAMES.keys())))
+        print("  Search sources:")
+        print("    (default)            High Courts via eCourts portal")
+        print("    --scr                Supreme Court Reports (SCR) portal")
+        print("")
+        print("  Search options:")
+        print("    --mode PHRASE|ANY|ALL   Search mode (default: PHRASE)")
+        print("    --proximity N           Word proximity for ALL mode (20-100)")
+        print("    --page N                Page number (default: 0)")
+        print("    --pages M:N             Page range")
+        print("    --all                   Fetch ALL matching results")
+        print("")
+        print("  High Court filters:")
+        print("    --court NAME            Filter by High Court (%s)" % court_list)
+        print("    --state CODE            Filter by state code")
+        print("    --judge NAME            Filter by judge name")
+        print("    --from DATE             Start date DD-MM-YYYY")
+        print("    --to DATE               End date DD-MM-YYYY")
+        print("")
+        print("  SCR filters:")
+        print("    --citation-year YYYY    Citation year")
+        print("    --citation-vol N        Citation volume")
+        print("    --citation-supl SUPPL   Citation supplement")
+        print("    --citation-page N       Citation page")
+        print("    --ncn CODE              Neutral citation number")
+        print("    --neu-cit-year YYYY     Neutral citation year")
+        print("    --neu-no N              Neutral citation number")
+        print("    --sel-lang CODE         Language")
+        print("")
+        print("  Output options:")
+        print("    --no-download           Skip PDF download, store in DB only")
+        print("    --download-db           Download pending PDFs from DB")
+        print("    --status                Show DB status for a search term")
+        print("    --export-csv PATH       Export DB results to CSV")
+        print("    --out DIR               Output directory")
         sys.exit(1)
 
     if not p["out"] and p["search"]:
         safe = re.sub(r"[^a-zA-Z0-9]+", "_", p["search"]).strip("_").lower() or "search"
-        p["out"] = os.path.join(os.path.expanduser("~/myJud"), safe)
+        if p.get("scr"):
+            p["out"] = os.path.join(os.path.expanduser("~/myJud"), "scr", safe)
+        else:
+            p["out"] = os.path.join(os.path.expanduser("~/myJud"), safe)
 
     return p
 
@@ -130,6 +178,13 @@ async def download_page(ec, page_num, page_size, search_term, out_dir, downloade
     if downloaded_cnrs is None:
         downloaded_cnrs = set()
 
+    scr_params = {}
+    if P["scr"]:
+        for k in ("citation_year", "citation_vol", "citation_supl",
+                   "citation_page", "ncn", "neu_cit_year", "neu_no", "sel_lang"):
+            if P.get(k):
+                scr_params[k] = P[k]
+
     log.info("")
     log.info("  Page %d (offset=%d)" % (page_num, page_num * page_size))
     entries, total = await ec.get_results(
@@ -137,6 +192,7 @@ async def download_page(ec, page_num, page_size, search_term, out_dir, downloade
         mode=P["mode"], state_code=P["state"],
         judge_name=P["judge"], from_date=P["from_date"],
         to_date=P["to_date"], proximity=P["proximity"],
+        **scr_params,
     )
     if not entries:
         return 0, []
@@ -196,9 +252,23 @@ def safe_remove(path):
             pass
 
 
+def _build_scr_params():
+    """Build dict of SCR extra params from global P that are non-empty."""
+    params = {}
+    for k in ("citation_year", "citation_vol", "citation_supl",
+              "citation_page", "ncn", "neu_cit_year", "neu_no", "sel_lang"):
+        if P.get(k):
+            params[k] = P[k]
+    return params
+
+
 async def run_search():
     global P
     await db.init_db()
+
+    is_scr = P["scr"]
+    base_url = SCR_BASE_URL if is_scr else BASE_URL
+    source_name = "Supreme Court (SCR)" if is_scr else "High Courts (eCourts)"
 
     mode_label = MODE_LABELS.get(P["mode"], P["mode"])
     if P["mode"] == "ALL" and P["proximity"]:
@@ -208,7 +278,7 @@ async def run_search():
         modes.append("ALL RESULTS")
 
     print("=" * 60)
-    print("  eCourts India — HC Judgments Scraper")
+    print("  srchigh — %s" % source_name)
     print("  Search: '%s'  |  %s" % (P["search"], " + ".join(modes)))
     parts = []
     if P["court"]: parts.append("court=" + P["court"])
@@ -216,17 +286,22 @@ async def run_search():
     if P["judge"]: parts.append("judge=" + P["judge"])
     if P["from_date"]: parts.append("from=" + P["from_date"])
     if P["to_date"]: parts.append("to=" + P["to_date"])
+    if is_scr:
+        scr_display = _build_scr_params()
+        for k, v in scr_display.items():
+            parts.append("%s=%s" % (k, v))
     if parts: print("  Filters: " + ", ".join(parts))
     print("  Output:  " + P["out"])
     print("=" * 60)
 
-    ec = ECourtSession()
+    fcourt = "3" if is_scr else "2"
+    ec = ECourtSession(base_url=base_url, fcourt_type=fcourt)
     print("")
     print("[1] Establishing session...")
-    await ec.client.get(BASE_URL)
+    await ec.client.get(base_url)
     print("[2] Solving captcha...")
     court_code = ""
-    if P["court"]:
+    if not is_scr and P["court"]:
         court_code = str(COURT_NAMES.get(P["court"], ""))
         if not court_code:
             for name, code in COURT_NAMES.items():
@@ -239,21 +314,24 @@ async def run_search():
     print("[3] Loading search page...")
     await ec.load_results_page(P["search"], mode=P["mode"])
 
+    scr_params = _build_scr_params()
     page_size = min(P["count"], 25)
     if P["all"]:
         page_size = 200
     for _ in range(3):
         await ec.get_results(P["search"], page=0, page_size=page_size, mode=P["mode"],
-                             state_code=P["state"], proximity=P["proximity"])
+                             state_code=P["state"], proximity=P["proximity"],
+                             **scr_params)
     test_entries, total = await ec.get_results(
         P["search"], page=0, page_size=page_size, mode=P["mode"],
         state_code=P["state"], proximity=P["proximity"],
+        **scr_params,
     )
 
     pages_to_fetch = []
     total_pages = 0
     if P["all"]:
-        total_pages = (total // page_size) + 1
+        total_pages = (total // page_size) + 1 if total else 1
         total_pages = min(total_pages, 500)
         pages_to_fetch = list(range(total_pages))
     elif P["pages"]:
@@ -269,7 +347,7 @@ async def run_search():
     print("    Page size:       %d per page" % page_size)
     print("    Total pages:     %d" % total_pages)
     print("    Max downloads:   %d" % (total_pages * page_size))
-    if P["all"]:
+    if P["all"] and total:
         eta = total_pages * page_size * 2
         if eta > 120:
             print("    Est. time:       ~%d min" % (eta // 60))
@@ -302,24 +380,25 @@ async def run_search():
             if not P["no_dl"] and dl_since_refresh >= 20:
                 log.info("  === Rotating session (%d downloads) ===" % 20)
                 await ec.close()
-                ec = ECourtSession()
-                await ec.client.get(BASE_URL)
+                ec = ECourtSession(base_url=base_url, fcourt_type=fcourt)
+                await ec.client.get(base_url)
                 ct, tk = await ec.solve_captcha(search_text=P["search"], search_opt=P["mode"])
                 await ec.load_results_page(P["search"], captcha=ct, mode=P["mode"])
                 dl_since_refresh = 0
 
-        except Exception as ex:
+        except (httpx.HTTPError, asyncio.TimeoutError) as ex:
             log.error("  Failed page %d: %s" % (pg, ex))
             if not P["no_dl"]:
                 await ec.close()
-                ec = ECourtSession()
-                await ec.client.get(BASE_URL)
+                ec = ECourtSession(base_url=base_url, fcourt_type=fcourt)
+                await ec.client.get(base_url)
                 ct, tk = await ec.solve_captcha(search_text=P["search"], search_opt=P["mode"])
                 await ec.load_results_page(P["search"], captcha=ct, mode=P["mode"])
                 dl_since_refresh = 0
 
     if all_entries:
-        await db.insert_judgments_batch(all_entries, P["search"])
+        source = "scr" if P.get("scr") else "ecourts"
+        await db.insert_judgments_batch(all_entries, P["search"], source=source)
         await db.upsert_search(P["search"], P["mode"], P["court"], total)
         log.info("  Stored %d entries in DB" % len(all_entries))
 

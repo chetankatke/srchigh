@@ -8,7 +8,7 @@ import os
 import re
 import logging
 
-from .config import DOWNLOADS_PER_SESSION, BASE_URL
+from .config import DOWNLOADS_PER_SESSION, BASE_URL, SCR_BASE_URL
 from .session import ECourtSession
 from . import db
 
@@ -19,11 +19,11 @@ _stats_lock = asyncio.Lock()
 
 
 async def _run_session(ec, search_term):
-    await ec.client.get(BASE_URL)
+    await ec.client.get(ec.base_url)
     ct, tk = await ec.solve_captcha(search_text=search_term)
     r = await ec.client.get(
-        BASE_URL + "?p=pdf_search/home&text=_batch&captcha=" + ct +
-        "&search_opt=PHRASE&fcourt_type=2&app_token=" + tk,
+        ec.base_url + "?p=pdf_search/home&text=_batch&captcha=" + ct +
+        "&search_opt=PHRASE&fcourt_type=%s&app_token=" % ec.fcourt_type + tk,
     )
     m = re.search(r'app_token=([^"&\s<>]+)', r.text)
     if m:
@@ -70,7 +70,7 @@ async def _download_one(sem, ec, entry, out_dir, search_term, stats):
             return False
 
 
-async def download_from_db(search_term="", out_dir=None, max_results=1000):
+async def download_from_db(search_term="", out_dir=None, max_results=1000, source=None):
     if out_dir is None:
         out_dir = os.path.join(os.path.expanduser("~"), "myJud", search_term or "download")
     os.makedirs(out_dir, exist_ok=True)
@@ -80,7 +80,13 @@ async def download_from_db(search_term="", out_dir=None, max_results=1000):
         log.info("  No undownloaded entries in DB for '%s'" % search_term)
         return None
 
-    log.info("  Loaded %d undownloaded entries from DB" % len(entries))
+    # Detect source from first entry if not given
+    if source is None:
+        source = entries[0].get("source", "ecourts") if entries else "ecourts"
+    base_url = SCR_BASE_URL if source == "scr" else BASE_URL
+    fcourt = "3" if source == "scr" else "2"
+
+    log.info("  Loaded %d undownloaded entries from DB (%s)" % (len(entries), source))
 
     already = set()
     for f in os.listdir(out_dir):
@@ -93,7 +99,7 @@ async def download_from_db(search_term="", out_dir=None, max_results=1000):
     stats = {"downloaded": 0, "failed": 0, "skipped": 0}
     sem = asyncio.Semaphore(MAX_CONCURRENT)
 
-    ec = ECourtSession()
+    ec = ECourtSession(base_url=base_url, fcourt_type=fcourt)
     dl_count = 0
     await _run_session(ec, search_term)
 
@@ -101,7 +107,7 @@ async def download_from_db(search_term="", out_dir=None, max_results=1000):
         if dl_count >= DOWNLOADS_PER_SESSION:
             log.info("  === Rotating session (%d downloads) ===" % DOWNLOADS_PER_SESSION)
             await ec.close()
-            ec = ECourtSession()
+            ec = ECourtSession(base_url=base_url, fcourt_type=fcourt)
             await _run_session(ec, search_term)
             dl_count = 0
 

@@ -11,10 +11,16 @@ import sys
 # ── Constants ──
 
 BASE_URL = "https://judgments.ecourts.gov.in/pdfsearch/"
+SCR_BASE_URL = "https://scr.sci.gov.in/scrsearch/"
 USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 )
+
+SOURCE_LABELS = {
+    "ecourts": "High Court (eCourts)",
+    "scr": "Supreme Court (SCR)",
+}
 
 # Numeric state_code → High Court name
 COURT_CODES = {

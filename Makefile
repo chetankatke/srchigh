@@ -1,13 +1,12 @@
 .PHONY: install install-dev test build clean uninstall
 
-# Install package in editable mode
+# Install package in editable mode (with dev/test deps)
 install:
-	pip3 install -r requirements.txt
-	pip3 install -e .
+	pip3 install -e ".[dev]"
 
 # Install dev/test dependencies
-install-dev: install
-	pip3 install pytest
+install-dev:
+	pip3 install -e ".[dev]"
 
 # Run tests
 test:
