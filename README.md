@@ -1,8 +1,8 @@
 # srchigh — Indian Court Judgments Scraper
 
-**Search, filter, export metadata, and download judgments from Indian High Courts (eCourts) and the Supreme Court (SCR).**
+**Search, filter, export metadata, and download judgments from Indian High Courts (eCourts), the Supreme Court Reports (SCR), and the Supreme Court (SCI) Judgment Date portal.**
 
-Reverse-engineers the [eCourts PDF Search](https://judgments.ecourts.gov.in/pdfsearch/) and [SCR Search](https://scr.sci.gov.in/scrsearch/) portals to provide a programmatic interface for bulk downloading Indian court judgments. Both sites run the same PHP MVC software stack — same Securimage captcha, same DataTable format — so a single codebase handles both. Handles captcha solving, session rotation, pagination, and rate-limiting automatically.
+Reverse-engineers the [eCourts PDF Search](https://judgments.ecourts.gov.in/pdfsearch/), [SCR Search](https://scr.sci.gov.in/scrsearch/), and [SCI Judgment Date](https://www.sci.gov.in/judgements-judgement-date/) portals to provide a programmatic interface for bulk downloading Indian court judgments. All portals share a similar PHP stack, though SCI uses a unique Math CAPTCHA and chunked date range limitations. The CLI handles captcha solving, session rotation, paginated retrieval, date-chunking, and real-time download progress automatically.
 
 ---
 
@@ -16,6 +16,7 @@ Reverse-engineers the [eCourts PDF Search](https://judgments.ecourts.gov.in/pdfs
   - [Search Modes](#search-modes)
   - [Court Filtering (High Courts)](#court-filtering-high-courts)
   - [SCR — Supreme Court Reports](#scr--supreme-court-reports)
+  - [SCI — Supreme Court Judgment Date](#sci--supreme-court-judgment-date)
   - [Pagination](#pagination)
   - [CSV Export](#csv-export)
   - [Batch Download from CSV](#batch-download-from-csv)
@@ -79,6 +80,8 @@ The eCourts portal is a PHP MVC application with server-side DataTables. Judgmen
       ┌─────┐
       │ PDF │  ←  Temporary URL returned by server
       └─────┘
+
+> Note: The SCI Judgment Date portal (`--sci`) follows a slightly different architecture, utilizing a math-based CAPTCHA instead of the distorted text one, which requires numerical OCR and programmatic evaluation.
 ```
 
 **Key insight:** The server ignores `search_txt` and filters by **`search_txt1`** (the "search within results" / FTS1 field). The JavaScript moves the keyword from the main field to FTS1 on page load.
@@ -90,7 +93,7 @@ The eCourts portal is a PHP MVC application with server-side DataTables. Judgmen
 | Dependency | Required for | Install |
 |---|---|---|
 | **Python 3.9+** | Runtime | `brew install python` / `apt install python3` |
-| **Tesseract OCR** | Captcha solving | `brew install tesseract` / `apt install tesseract-ocr` |
+| **Tesseract OCR** | Alpha CAPTCHA solving | `brew install tesseract` / `apt install tesseract-ocr` |
 | **Pip modules** | All functionality | `pip3 install -e "."` |
 
 ### Installing Tesseract
@@ -172,6 +175,10 @@ srchigh "divorce" 5 --scr
 # SCR with citation filter
 srchigh "2024 AIR 1" 5 --scr --citation-year 2024 --citation-vol 1
 
+# Supreme Court (SCI) Judgment Date Search
+srchigh --sci --month 01-2024
+srchigh --sci --from 01-01-2024 --to 15-01-2024
+
 # Export ALL High Court results as CSV (no PDFs)
 srchigh "divorce" --court bombay --all --csv --no-download
 
@@ -199,6 +206,7 @@ Positional:
 Search sources:
   (default)             High Courts via eCourts portal
   --scr                 Supreme Court Reports (SCR) portal
+  --sci                 Supreme Court (SCI) Judgment Date portal
 
 Search options:
   --mode PHRASE|ANY|ALL Search mode (default: PHRASE)
@@ -223,6 +231,11 @@ SCR filters:
   --neu-cit-year YYYY   Neutral citation year
   --neu-no N            Neutral citation number
   --sel-lang CODE       Language
+
+SCI Judgment Date filters:
+  --from DD-MM-YYYY     Start date
+  --to DD-MM-YYYY       End date
+  --month MM-YYYY       Fetch an entire month
 
 Output options:
   --no-download         Skip PDF download, store in DB only
@@ -316,6 +329,23 @@ srchigh "divorce" --scr --all --no-download
 | `--sel-lang CODE` | Language filter |
 
 **Output directory:** SCR downloads go to `~/myJud/scr/<search_term>/` to avoid mixing with High Court PDFs.
+
+### SCI — Supreme Court Judgment Date
+
+Search the Supreme Court of India (SCI) Judgment Date portal at `https://www.sci.gov.in/judgements-judgement-date/` using the `--sci` flag. Because this portal strictly operates on date ranges (with a maximum span of 30 days per query), the CLI will automatically split larger ranges into 30-day chunks and fetch them sequentially. It also solves its unique math CAPTCHA using `ddddocr`.
+
+```bash
+# Fetch an entire month (auto-splits if necessary, but 1 month fits in a chunk)
+srchigh --sci --month 01-2024
+
+# Fetch an exact date range
+srchigh --sci --from 15-05-2024 --to 25-05-2024
+
+# Fetch an entire year (automatically chunked into ~12 requests)
+srchigh --sci --from 01-01-2023 --to 31-12-2023
+```
+
+**Output directory:** SCI downloads go to `~/myJud/sci/` since they are not keyword-bound.
 
 ---
 
@@ -442,15 +472,21 @@ Edit this file to set persistent preferences. For example, setting `"default_cou
     ├── test_export.py       # CSV/DB read/write (10 tests)
     ├── test_session.py      # Integration tests — real server (10 tests)
     └── test_smoke.py        # CLI args, imports, flags (20 tests)
-```
+
+---
+
+## Download Progress
+
+All PDF downloads use `tqdm` combined with chunked `httpx` streams. This provides real-time progress bars for every file downloaded, detailing bytes fetched, total bytes, and transfer speeds, which is highly useful when pulling heavy multi-megabyte PDFs.
 
 ---
 
 ## Captcha Solving
 
-The eCourts portal uses **Securimage**, a PHP CAPTCHA library that generates distorted text images (215×70 PNG). The solving pipeline:
+The eCourts and SCR portals use **Securimage**, a PHP CAPTCHA library that generates distorted alphanumeric text images. 
+The SCI Judgment Date portal uses a unique **Math CAPTCHA** (e.g., "5 + 3 = ?").
 
-### 1. Download
+### 1. eCourts/SCR Alphanumeric CAPTCHA
 ```python
 cr = session.get("vendor/securimage/securimage_show.php")
 ```
@@ -477,9 +513,12 @@ for thresh in (110, 120, 130, 140, 150, 160, 170):
 
 Each unique OCR guess is POSTed to `checkCaptcha`. The server responds with `captcha_status: "Y"` or `"N"`.
 
-### 4. Retry loop
+### 4. Retry loop (eCourts/SCR)
 
 Up to **30 attempts**, with session refresh every 5 failures. Success rate: **~90% within 1-3 tries**.
+
+### 5. SCI Math CAPTCHA
+For the SCI Judgment Date portal, `srchigh` uses `ddddocr` to read the math formula. If the OCR successfully extracts the two numbers but misses the math operator (a common failure mode due to image noise), a heuristic fallback intelligently guesses the operator (`+` or `-`), affording a 50% chance of success which combined with the automatic retry system seamlessly clears the verification wall.
 
 ### Why not a captcha service?
 
@@ -711,7 +750,9 @@ The binary bundles Python, all pip dependencies, and the application code into a
 | `httpx` | Async HTTP client |
 | `aiosqlite` | Async SQLite |
 | `Pillow` | Image processing for captcha |
-| `pytesseract` | OCR engine binding |
+| `pytesseract` | OCR engine binding for alphanumeric CAPTCHAs |
+| `ddddocr` | Machine learning OCR for SCI Math CAPTCHAs |
+| `tqdm` | Real-time progress bars for downloads |
 | `parsel` | CSS/XPath selectors for HTML parsing |
 
 ### Anti-bot measures handled
