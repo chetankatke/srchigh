@@ -52,10 +52,26 @@ def _split_date_range(from_date, to_date):
     return chunks
 
 
+_MONTH_MAP = {
+    "jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
+    "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12,
+}
+
+
 def _parse_sci_date(d_str):
-    """Parse DD-MM-YYYY string to date object."""
+    """Parse date string to date object. Handles DD-MM-YYYY and DD-Mon-YYYY."""
     parts = d_str.split("-")
-    return date(int(parts[2]), int(parts[1]), int(parts[0]))
+    if len(parts) != 3:
+        return None
+    day, month_str, year = int(parts[0]), parts[1].lower(), int(parts[2])
+    # Try numeric month first, then named month
+    if month_str.isdigit():
+        month = int(month_str)
+    else:
+        month = _MONTH_MAP.get(month_str[:3])
+    if month is None:
+        return None
+    return date(year, month, day)
 
 
 def _fmt_date(d):
@@ -173,23 +189,27 @@ class SCISession:
             "scid": self.scid,
             self.tok_name: self.tok_value,
             "language": "en",
+            "es_ajax_request": "1",
         }
         r = await self._get(AJAX_URL, params=params)
         try:
             j = json.loads(r.text)
         except json.JSONDecodeError:
+            log.error("    Raw response (not JSON): %s" % r.text[:300])
             return [], True
 
         if not j.get("success"):
             err_data = j.get("data", "")
             if isinstance(err_data, str):
                 try:
-                    err_msg = json.loads(err_data).get("message", err_data[:200])
+                    err_data_json = json.loads(err_data)
+                    err_msg = err_data_json.get("message", err_data[:200])
                 except (json.JSONDecodeError, AttributeError):
                     err_msg = err_data[:200]
             else:
                 err_msg = str(err_data)[:200]
             log.error("    Server rejected: %s" % err_msg)
+            log.error("    Full response: %s" % json.dumps(j)[:500])
             return [], False  # captcha rejected
 
         html = j.get("data", "")
@@ -197,74 +217,42 @@ class SCISession:
             html = html.get("resultsHtml", "")
 
         entries = self._parse_results_table(html)
+        if html and not entries:
+            log.info("    Raw response (first 800): %s..." % html[:800])
+        log.info("    Found %d entries in response" % len(entries))
         return entries, True
 
     def _parse_results_table(self, html):
-        """Parse the results HTML table into judgment dicts."""
+        """Parse the results HTML table into judgment dicts, extracting PDF URLs."""
         entries = []
-        # Find each table row with data-diary-no and data-diary-year
         for m in re.finditer(
-            r'<tr[^>]*data-diary-no="(\d+)"[^>]*data-diary-year="(\d+)"[^>]*>'
+            r'<tr[^>]*data-diary-no="([^"]+)"[^>]*data-diary-year="([^"]+)"[^>]*>'
             r'(.*?)</tr>',
             html, re.IGNORECASE | re.DOTALL
         ):
             diary_no = m.group(1)
             diary_year = m.group(2)
             row_html = m.group(3)
-
-            # Extract text from table cells (td)
             cells = re.findall(r'<td[^>]*>(.*?)</td>', row_html, re.DOTALL)
-            entry = {
-                "diary_no": diary_no,
-                "diary_year": diary_year,
-            }
-            if len(cells) >= 1:
-                entry["decision_date"] = re.sub(r'<[^>]+>', '', cells[0]).strip()
+
+            entry = {"diary_no": diary_no, "diary_year": diary_year}
+
+            # Column mapping from actual HTML:
+            # 0=Serial No, 1=Diary Number, 2=Case Number, 3=Petitioner/Respondent,
+            # 4=Advocate, 5=Bench, 6=Judgment By, 7=Judgment (has PDF links)
             if len(cells) >= 2:
-                entry["case_no"] = re.sub(r'<[^>]+>', '', cells[1]).strip()
-            if len(cells) >= 3:
-                entry["judge"] = re.sub(r'<[^>]+>', '', cells[2]).strip()
+                entry["case_no"] = re.sub(r'<[^>]+>', '', cells[2]).strip()
             if len(cells) >= 4:
                 entry["case_title"] = re.sub(r'<[^>]+>', '', cells[3]).strip()
-            if len(cells) >= 5:
-                entry["free_text"] = re.sub(r'<[^>]+>', '', cells[4]).strip()
+            if len(cells) >= 6:
+                entry["judge"] = re.sub(r'<[^>]+>', '', cells[5]).strip()
+            # Extract PDF URL from the Judgment column (last cell)
+            if len(cells) >= 8:
+                pdf_m = re.search(r'href="([^"]+\.pdf)"', cells[7])
+                if pdf_m:
+                    entry["pdf_url"] = pdf_m.group(1)
             entries.append(entry)
         return entries
-
-    async def get_case_details(self, diary_no, diary_year):
-        """Fetch case details HTML which contains the PDF download link."""
-        params = {
-            "action": "get_case_details",
-            "diary_no": diary_no,
-            "diary_year": diary_year,
-            "es_ajax_request": "1",
-            "language": "en",
-        }
-        r = await self._get(AJAX_URL, params=params)
-        try:
-            j = json.loads(r.text)
-        except json.JSONDecodeError:
-            return None
-        if not j.get("success"):
-            return None
-        return j.get("data", "")
-
-    def _extract_pdf_url(self, details_html):
-        """Extract PDF download URL from case details HTML."""
-        if not details_html:
-            return None
-        # Look for direct PDF links
-        m = re.search(r'href="([^"]+\.pdf[^"]*)"', details_html, re.IGNORECASE)
-        if m:
-            url = m.group(1)
-            if url.startswith("http"):
-                return url
-            return urljoin(SCI_BASE, url)
-        # Look for download links with onclick or data attributes
-        m = re.search(r'data-url="([^"]+)"', details_html)
-        if m:
-            return urljoin(SCI_BASE, m.group(1))
-        return None
 
     async def download_pdf(self, url, filepath):
         """Download a PDF and return file size, or 0 on failure."""

@@ -512,28 +512,32 @@ async def run_sci_search():
 
         for idx, entry in enumerate(entries, 1):
             diary_no = entry.get("diary_no", "")
-            diary_year = entry.get("diary_year", "")
+            pdf_url = entry.get("pdf_url", "")
             label = entry.get("case_no", "") or entry.get("diary_no", "")
-            dec_date = entry.get("decision_date", "")
-            print("\n  [%d/%d] %s (%s)" % (idx, len(entries), label, dec_date))
+            print("\n  [%d/%d] %s" % (idx, len(entries), label))
 
-            # Parse decision date for folder organization
+            # Extract judgment date from PDF filename like "..._Judgement_02-Jan-2024.pdf"
+            dec_date = ""
+            if pdf_url:
+                dm = re.search(r'Judgement_(\d{2}-[A-Z][a-z]+-\d{4})\.pdf', pdf_url)
+                if dm:
+                    dec_date = dm.group(1)
+
+            # Parse date for folder organization: ~/myJud/sci/<year>/<month>/
             try:
                 d = _parse_sci_date(dec_date) if dec_date else chunk_from
             except (ValueError, IndexError):
                 d = chunk_from
             month_dir = os.path.join(base_out, str(d.year), "%02d" % d.month)
 
-            pdf_path = os.path.join(month_dir, "%s_%s.pdf" % (dec_date.replace("-", ""), diary_no))
+            # Safe filename from diary_no (which may contain /)
+            safe_name = diary_no.replace("/", "_").replace(" ", "_")
+            pdf_path = os.path.join(month_dir, "%s.pdf" % safe_name)
 
             # Skip if already downloaded
             if os.path.exists(pdf_path) and os.path.getsize(pdf_path) > 1000:
                 print("    Already exists, skipping")
                 continue
-
-            print("    Fetching details...")
-            details = await ec.get_case_details(diary_no, diary_year)
-            pdf_url = ec._extract_pdf_url(details) if details else None
 
             if pdf_url:
                 print("    Downloading PDF...")
