@@ -133,21 +133,43 @@ class SCISession:
 
         Format is 'NUM+NUM' or 'NUM-NUM' with numbers 1-10.
         """
-        m = re.match(r'(\d+)\s*([+-])\s*(\d+)', ocr_text.strip())
-        if not m:
+        import random
+        ocr_text = ocr_text.strip()
+        m = re.match(r'^(\d+)\s*([+-])\s*(\d+)$', ocr_text)
+        if m:
+            a, op, b = int(m.group(1)), m.group(2), int(m.group(3))
+            if op == '+':
+                return str(a + b)
+            elif op == '-':
+                return str(a - b) if a > b else None
             return None
-        a, op, b = int(m.group(1)), m.group(2), int(m.group(3))
+
+        # Fallback: ddddocr often misses the operator entirely.
+        nums = re.findall(r'\d+', ocr_text)
+        if len(nums) == 1 and len(nums[0]) >= 2:
+            s = nums[0]
+            if s.startswith('10') and len(s) > 2:
+                a, b = 10, int(s[2:])
+            else:
+                a, b = int(s[0]), int(s[1:])
+        elif len(nums) >= 2:
+            a, b = int(nums[0]), int(nums[1])
+        else:
+            return None
+
         if not (1 <= a <= 10 and 1 <= b <= 10):
             return None
-        if op == '+':
-            return str(a + b)
-        elif op == '-':
-            return str(a - b) if a > b else None
-        return None
+
+        op = random.choice(['+', '-'])
+        # if a <= b, '-' would be zero or negative, so must be '+'
+        if op == '-' and a <= b:
+            op = '+'
+
+        return str(a + b) if op == '+' else str(a - b)
 
     async def solve_captcha(self, max_tries=30):
         """Download and solve the securimage-wp math captcha using ddddocr."""
-        ocr = ddddocr.DdddOcr()
+        ocr = ddddocr.DdddOcr(show_ad=False)
         for attempt in range(1, max_tries + 1):
             url = CAPTCHA_URL + self.scid
             print(f"\n\033[1;36m┌── Captcha Attempt {attempt}/{max_tries} ──────────────────────────────────────┐\033[0m", flush=True)
@@ -226,13 +248,12 @@ class SCISession:
         """Parse the results HTML table into judgment dicts, extracting PDF URLs."""
         entries = []
         for m in re.finditer(
-            r'<tr[^>]*data-diary-no="([^"]+)"[^>]*data-diary-year="([^"]+)"[^>]*>'
-            r'(.*?)</tr>',
+            r'<tr[^>]*data-diary-no="([^"]+)"[^>]*>(.*?)</tr>',
             html, re.IGNORECASE | re.DOTALL
         ):
             diary_no = m.group(1)
-            diary_year = m.group(2)
-            row_html = m.group(3)
+            diary_year = diary_no.split("/")[-1] if "/" in diary_no else ""
+            row_html = m.group(2)
             cells = re.findall(r'<td[^>]*>(.*?)</td>', row_html, re.DOTALL)
 
             entry = {"diary_no": diary_no, "diary_year": diary_year}
@@ -256,16 +277,37 @@ class SCISession:
 
     async def download_pdf(self, url, filepath):
         """Download a PDF and return file size, or 0 on failure."""
+        import os as _os
+        from tqdm import tqdm
         try:
-            r = await self.client.get(url, timeout=60.0)
-            if r.status_code == 200:
-                ct = r.headers.get("Content-Type", "").lower()
-                if "pdf" in ct or len(r.content) > 1000:
-                    import os as _os
+            async with self.client.stream("GET", url, timeout=60.0) as r:
+                if r.status_code == 200:
+                    ct = r.headers.get("Content-Type", "").lower()
+                    total_size = int(r.headers.get("Content-Length", 0))
+                    
                     _os.makedirs(_os.path.dirname(filepath), exist_ok=True)
-                    with open(filepath, "wb") as f:
-                        f.write(r.content)
-                    return len(r.content)
+                    
+                    downloaded = 0
+                    with open(filepath, "wb") as f, tqdm(
+                        desc=_os.path.basename(filepath),
+                        total=total_size if total_size > 0 else None,
+                        unit="B",
+                        unit_scale=True,
+                        unit_divisor=1024,
+                        leave=False
+                    ) as pbar:
+                        async for chunk in r.aiter_bytes(chunk_size=8192):
+                            f.write(chunk)
+                            downloaded += len(chunk)
+                            pbar.update(len(chunk))
+                            
+                    if "pdf" in ct or downloaded > 1000:
+                        return downloaded
+                    else:
+                        try:
+                            _os.remove(filepath)
+                        except OSError:
+                            pass
         except Exception:
             pass
         return 0

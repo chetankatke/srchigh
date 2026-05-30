@@ -259,14 +259,37 @@ class ECourtSession:
         return None
 
     async def download_pdf(self, url, filename):
+        import os as _os
+        from tqdm import tqdm
         try:
-            r = await self.client.get(url, timeout=60.0)
-            if r.status_code == 200:
-                ct = r.headers.get("Content-Type", "").lower()
-                if "pdf" in ct or len(r.content) > 1000:
-                    with open(filename, "wb") as f:
-                        f.write(r.content)
-                    return len(r.content)
+            async with self.client.stream("GET", url, timeout=60.0) as r:
+                if r.status_code == 200:
+                    ct = r.headers.get("Content-Type", "").lower()
+                    total_size = int(r.headers.get("Content-Length", 0))
+                    
+                    _os.makedirs(_os.path.dirname(filename), exist_ok=True)
+                    
+                    downloaded = 0
+                    with open(filename, "wb") as f, tqdm(
+                        desc=_os.path.basename(filename),
+                        total=total_size if total_size > 0 else None,
+                        unit="B",
+                        unit_scale=True,
+                        unit_divisor=1024,
+                        leave=False
+                    ) as pbar:
+                        async for chunk in r.aiter_bytes(chunk_size=8192):
+                            f.write(chunk)
+                            downloaded += len(chunk)
+                            pbar.update(len(chunk))
+                            
+                    if "pdf" in ct or downloaded > 1000:
+                        return downloaded
+                    else:
+                        try:
+                            _os.remove(filename)
+                        except OSError:
+                            pass
         except Exception:
             pass
         return 0
