@@ -9,10 +9,11 @@ import io
 import json
 import re
 import asyncio
+from collections import Counter
 from urllib.parse import urlparse
 
 import httpx
-from PIL import Image
+from PIL import Image, ImageFilter
 import pytesseract
 
 from .config import USER_AGENT
@@ -98,10 +99,14 @@ class ECourtSession:
                 print("\033[1;36m└──────────────────────────────────────────────────────────────────┘\033[0m", flush=True)
                 continue
 
+            # Enhance image for better OCR: upscale 2x and apply median filter to reduce background noise
+            enhanced_img = img.resize((img.width * 2, img.height * 2), Image.Resampling.LANCZOS)
+            enhanced_img = enhanced_img.filter(ImageFilter.MedianFilter(size=3))
+
             guesses_by_thresh = {}
             guesses = set()
             for thresh in (110, 120, 130, 140, 150, 160, 170):
-                bw = img.point(lambda x, t=thresh: 0 if x < t else 255)
+                bw = enhanced_img.point(lambda x, t=thresh: 0 if x < t else 255)
                 text = pytesseract.image_to_string(
                     bw,
                     config="--psm 8 -c tessedit_char_whitelist="
@@ -128,8 +133,12 @@ class ECourtSession:
                 print("\033[1;36m└──────────────────────────────────────────────────────────────────┘\033[0m", flush=True)
                 continue
 
+            # Sort guesses by how many thresholds produced them (consensus first)
+            guess_counts = Counter(v for v in guesses_by_thresh.values() if v in guesses)
+            sorted_guesses = sorted(guesses, key=lambda g: (-guess_counts.get(g, 0), g))
+
             print("    \033[1;34mStep 2: Validating guesses against server:\033[0m", flush=True)
-            for guess in sorted(guesses):
+            for guess in sorted_guesses:
                 try:
                     print(f"      Testing guess \033[1;35m'{guess}'\033[0m ... ", end="", flush=True)
                     r = await self._post("?p=pdf_search/checkCaptcha", data={

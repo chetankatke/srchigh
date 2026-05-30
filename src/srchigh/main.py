@@ -198,8 +198,8 @@ async def download_page(ec, page_num, page_size, search_term, out_dir, downloade
         return 0, []
 
     for e in entries:
-        cnr = e.get("cnr", "") or e.get("case_title", "?")[:40]
-        log.info("    " + cnr)
+        label = e.get("citation", "") or e.get("cnr", "") or e.get("case_title", "?")[:40]
+        log.info("    " + label)
 
     if not os.path.exists(out_dir):
         os.makedirs(out_dir, exist_ok=True)
@@ -208,7 +208,11 @@ async def download_page(ec, page_num, page_size, search_term, out_dir, downloade
     page_entries = []
 
     for e in entries:
-        cnr = e.get("cnr", "").replace("/", "_").replace(" ", "_")
+        # SCR: use citation as filename; fall back to CNR; fall back to hash
+        if P.get("scr") and e.get("citation"):
+            cnr = e["citation"].replace(" ", "_").replace(".", "").replace(",", "")
+        else:
+            cnr = e.get("cnr", "").replace("/", "_").replace(" ", "_")
         if not cnr or cnr == "N/A":
             cnr = "judgment_%d" % (hash(e.get("path", "")) % 1000000)
 

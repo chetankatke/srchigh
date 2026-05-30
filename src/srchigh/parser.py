@@ -61,6 +61,15 @@ def parse_entry(html):
     if court_text:
         entry["court"] = court_text.strip()
 
+    # ── Citation (SCR format: [2026] 2 S.C.R. 231) ──
+    # The citation may appear anywhere in the cell text for SCR entries.
+    # Pattern: [YEAR] VOL S.C.R. PAGE  or  (YEAR) VOL S.C.R. PAGE
+    all_text = sel.css('*::text').getall()
+    full_text = " ".join(t.strip() for t in all_text if t.strip())
+    cit_m = re.search(r'[\[\(](\d{4})[\]\)]\s+(\d+)\s+S\.?\s*C\.?\s*R\.?\s+(\d+)', full_text, re.IGNORECASE)
+    if cit_m:
+        entry["citation"] = "[%s] %s S.C.R. %s" % (cit_m.group(1), cit_m.group(2), cit_m.group(3))
+
     # ── Date fields ──
     # All <font color="green"> elements in order: CNR, Reg Date, Decision Date, Disposal Nature
     greens = sel.css('font[color="green"]::text').getall()

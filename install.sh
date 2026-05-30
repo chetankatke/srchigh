@@ -26,11 +26,7 @@ else
 fi
 
 echo ""
-echo "[2] Installing Python dependencies..."
-pip3 install --user -r "$(dirname "$0")/requirements.txt" 2>&1 | tail -3
-
-echo ""
-echo "[3] Installing srchigh package..."
+echo "[2] Installing srchigh package..."
 cd "$(dirname "$0")"
 pip3 install --user -e . 2>&1 | tail -5 || {
     echo ""

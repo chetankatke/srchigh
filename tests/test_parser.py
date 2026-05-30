@@ -58,6 +58,38 @@ class TestParseEntry:
         result = parse_entry(sample_entry_bombay)
         assert result.get("disposal_nature") == "DISPOSED OFF"
 
+    def test_extracts_scr_citation(self):
+        """SCR entry with citation in text [2026] 2 S.C.R. 231."""
+        html = (
+            '<button aria-label="[2026] 2 S.C.R. 231 pdf" '
+            'onclick="open_pdf(\'0\',\'\',\'court/scr/2026_2_231.pdf\');">'
+            '<font>[2026] 2 S.C.R. 231</font></button><br>'
+            '<strong>Judge : JUSTICE X</strong><br>'
+            '<strong class="caseDetailsTD">'
+            '<span style="color:#212F3D"> CNR :</span>'
+            '<font color="green"> SCR202600020231</font>'
+            '<span style="color:#212F3D"> | Decision Date :</span>'
+            '<font color="green"> 01-01-2026</font><br>'
+            '<span style="opacity: 0.5;">Court : Supreme Court of India</span>'
+            '</strong>'
+        )
+        result = parse_entry(html)
+        assert result.get("citation") == "[2026] 2 S.C.R. 231"
+
+    def test_extracts_scr_citation_with_dots(self):
+        """SCR citation with variable spacing: 2024 (2) S.C.R. 123"""
+        html = (
+            '<button aria-label="(2024) 2 S.C.R. 123 pdf" '
+            'onclick="open_pdf(\'0\',\'\',\'court/scr/2024_2_123.pdf\');">'
+            '<font>(2024) 2 S.C.R. 123</font></button><br>'
+            '<strong>Judge : JUSTICE Y</strong><br>'
+            '<strong class="caseDetailsTD">'
+            '<span style="opacity: 0.5;">Court : Supreme Court of India</span>'
+            '</strong>'
+        )
+        result = parse_entry(html)
+        assert result.get("citation") == "[2024] 2 S.C.R. 123"
+
     def test_minimal_entry(self, sample_entry_minimal):
         result = parse_entry(sample_entry_minimal)
         assert result.get("cnr") == "XXHC0000000000"
