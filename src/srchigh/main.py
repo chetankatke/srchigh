@@ -51,7 +51,6 @@ def parse_args():
         "citation_page": "", "ncn": "", "neu_cit_year": "",
         "neu_no": "", "sel_lang": "",
         "sci": False,
-        "from_date_sci": "", "to_date_sci": "",
         "month_sci": "", "year_sci": "",
     }
     pos = 0
@@ -86,10 +85,6 @@ def parse_args():
             p["to_date"] = args[i + 1]; i += 2
         elif a == "--sci":
             p["sci"] = True; i += 1
-        elif a == "--from" and i + 1 < len(args):
-            p["from_date_sci"] = args[i + 1]; i += 2
-        elif a == "--to" and i + 1 < len(args):
-            p["to_date_sci"] = args[i + 1]; i += 2
         elif a == "--month" and i + 1 < len(args):
             p["month_sci"] = args[i + 1]; i += 2
         elif a == "--year" and i + 1 < len(args):
@@ -442,8 +437,8 @@ async def run_search():
 def _resolve_sci_dates():
     """Resolve SCI date parameters into (from_date, to_date) date objects."""
     from datetime import date as dt_date
-    if P.get("from_date_sci") and P.get("to_date_sci"):
-        return _parse_sci_date(P["from_date_sci"]), _parse_sci_date(P["to_date_sci"])
+    if P.get("from_date") and P.get("to_date"):
+        return _parse_sci_date(P["from_date"]), _parse_sci_date(P["to_date"])
     if P.get("month_sci"):
         parts = P["month_sci"].split("-")
         y, m = int(parts[1]), int(parts[0])
