@@ -45,7 +45,7 @@ def parse_args():
         "page": 0, "pages": None, "state": "", "judge": "",
         "from_date": "", "to_date": "", "out": "",
         "court": "", "all": False, "no_dl": False, "dump_all": False,
-        "download_db": False, "status": False, "export_csv": "",
+        "download_db": False, "status": False, "export_csv": "", "csv": False,
         "scr": False,
         "citation_year": "", "citation_vol": "", "citation_supl": "",
         "citation_page": "", "ncn": "", "neu_cit_year": "",
@@ -117,6 +117,8 @@ def parse_args():
             p["download_db"] = True; i += 1
         elif a == "--status":
             p["status"] = True; i += 1
+        elif a == "--csv":
+            p["csv"] = True; i += 1
         elif a == "--export-csv" and i + 1 < len(args):
             p["export_csv"] = args[i + 1]; i += 2
         elif a == "--out" and i + 1 < len(args):
@@ -177,7 +179,9 @@ def parse_args():
         print("    (max 30-day range per request, auto-split into chunks)")
         print("")
         print("  Output options:")
+        print("    --dump-all              Fetch EVERY judgment (no search term needed)")
         print("    --no-download           Skip PDF download, store in DB only")
+        print("    --csv                   Export search results directly to CSV")
         print("    --download-db           Download pending PDFs from DB")
         print("    --status                Show DB status for a search term")
         print("    --export-csv PATH       Export DB results to CSV")
@@ -434,6 +438,10 @@ async def run_search():
         print("  Done! %d results stored in DB. Use --download-db to download PDFs." % len(all_entries))
     else:
         print("  Done! %d PDF(s) downloaded to %s/" % (total_dl, P["out"]))
+    if P["csv"] and all_entries:
+        out_csv = os.path.join(P["out"], "_results.csv")
+        await db.export_to_csv(P["search"], out_csv)
+        print("  Results exported to %s" % out_csv)
     print("=" * 60)
 
 
@@ -558,6 +566,10 @@ async def run_sci_search():
     print("\n" + "=" * 60)
     print("  Done! %d PDF(s) downloaded to %s/" % (total_downloaded, base_out))
     print("  Total judgments found: %d" % total_found)
+    if P["csv"] and total_found:
+        out_csv = os.path.join(base_out, "_results.csv")
+        await db.export_to_csv(P.get("search", ""), out_csv)
+        print("  Results exported to %s" % out_csv)
     print("=" * 60)
 
 
