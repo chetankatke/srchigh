@@ -44,7 +44,7 @@ def parse_args():
         "search": "", "count": 5, "mode": "PHRASE", "proximity": "",
         "page": 0, "pages": None, "state": "", "judge": "",
         "from_date": "", "to_date": "", "out": "",
-        "court": "", "all": False, "no_dl": False,
+        "court": "", "all": False, "no_dl": False, "dump_all": False,
         "download_db": False, "status": False, "export_csv": "",
         "scr": False,
         "citation_year": "", "citation_vol": "", "citation_supl": "",
@@ -109,6 +109,8 @@ def parse_args():
             p["sel_lang"] = args[i + 1]; i += 2
         elif a == "--all":
             p["all"] = True; i += 1
+        elif a == "--dump-all":
+            p["dump_all"] = True; i += 1
         elif a == "--no-download":
             p["no_dl"] = True; i += 1
         elif a == "--download-db":
@@ -133,7 +135,7 @@ def parse_args():
             pos += 1
             i += 1
 
-    if not p["search"] and not p["download_db"] and not p["status"] and not p["export_csv"] and not p.get("sci"):
+    if not p["search"] and not p.get("dump_all") and not p["download_db"] and not p["status"] and not p["export_csv"] and not p.get("sci"):
         court_list = ", ".join(sorted(COURT_NAMES.keys()))
         print("Usage: python3 main.py <search_term> [count] [options]")
         print("")
@@ -148,6 +150,7 @@ def parse_args():
         print("    --page N                Page number (default: 0)")
         print("    --pages M:N             Page range")
         print("    --all                   Fetch ALL matching results")
+        print("    --dump-all              Fetch EVERY judgment (no search term needed)")
         print("")
         print("  High Court filters:")
         print("    --court NAME            Filter by High Court (%s)" % court_list)
@@ -181,8 +184,8 @@ def parse_args():
         print("    --out DIR               Output directory")
         sys.exit(1)
 
-    if not p["out"] and p["search"]:
-        safe = re.sub(r"[^a-zA-Z0-9]+", "_", p["search"]).strip("_").lower() or "search"
+    if not p["out"] and (p["search"] or p.get("dump_all")):
+        safe = re.sub(r"[^a-zA-Z0-9]+", "_", p["search"]).strip("_").lower() or "_all_judgments"
         if p.get("scr"):
             p["out"] = os.path.join(os.path.expanduser("~/myJud"), "scr", safe)
         else:

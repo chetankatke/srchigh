@@ -182,6 +182,9 @@ srchigh --sci --from 01-01-2024 --to 15-01-2024
 # Export ALL High Court results as CSV (no PDFs)
 srchigh "divorce" --court bombay --all --csv --no-download
 
+# Dump all 38k+ judgments from SCR without a search term
+srchigh --dump-all --scr --all --csv --no-download
+
 # Get help
 srchigh
 ```
@@ -238,6 +241,7 @@ SCI Judgment Date filters:
   --month MM-YYYY       Fetch an entire month
 
 Output options:
+  --dump-all            Fetch EVERY judgment (no search term needed)
   --no-download         Skip PDF download, store in DB only
   --download-db         Download pending PDFs from DB
   --status              Show DB status for a search term
@@ -367,9 +371,15 @@ srchigh "divorce" 5 --pages 0:5
 
 # ALL results (up to 12,500 = 500 pages × 25/page)
 srchigh "divorce" --court bombay --all
+
+# Fetch EVERY judgment in the entire court database
+srchigh --dump-all --court bombay --all --csv --no-download
 ```
 
 With `--all`, the script automatically paginates through every page of results. Page size is set to **200** (for speed) and capped at **500 pages** (12,500 judgments) to avoid abuse.
+
+> [!CAUTION]
+> Using `--dump-all` on High Courts will attempt to fetch over 17.6 million records. It is highly recommended to combine `--dump-all` with `--csv --no-download` to export metadata without filling up your storage with PDFs.
 
 ### CSV Export
 
