@@ -66,7 +66,7 @@ def parse_args():
             i += 2
         elif a == "--mode" and i + 1 < len(args):
             m = args[i + 1].upper()
-            if m in ("PHRASE", "ANY", "ALL"):
+            if m in ("PHRASE", "ANY", "ALL", "BOOLEAN"):
                 p["mode"] = m
                 if m == "ALL" and not p["proximity"]:
                     p["proximity"] = "40"
@@ -143,7 +143,7 @@ def parse_args():
         print("    --sci                SCI Judgment Date portal")
         print("")
         print("  Search options:")
-        print("    --mode PHRASE|ANY|ALL   Search mode (default: PHRASE)")
+        print("    --mode PHRASE|ANY|ALL|BOOLEAN Search mode (default: PHRASE)")
         print("    --proximity N           Word proximity for ALL mode (20-100)")
         print("    --page N                Page number (default: 0)")
         print("    --pages M:N             Page range")

@@ -209,7 +209,7 @@ Search sources:
   --sci                 Supreme Court (SCI) Judgment Date portal
 
 Search options:
-  --mode PHRASE|ANY|ALL Search mode (default: PHRASE)
+  --mode PHRASE|ANY|ALL|BOOLEAN Search mode (default: PHRASE)
   --proximity N         Word proximity for ALL mode (20-100, default: 40)
   --page N              Page number (default: 0)
   --pages M:N           Page range (e.g. 0:10)
@@ -256,6 +256,7 @@ The eCourts portal supports three search modes, matching the radio buttons on th
 | `--mode PHRASE` (default) | **Phrase(s)** | Exact phrase match — "divorce custody" finds that exact phrase | No |
 | `--mode ANY` | **Any Words** | OR search — finds judgments with "divorce" OR "custody" | No |
 | `--mode ALL` | **All Words** | AND search — finds judgments with "divorce" AND "custody" | Yes, default 40 |
+| `--mode BOOLEAN` | **(Hidden/Advanced)** | Advanced search using `AND`, `OR` in caps (e.g. `murder AND bail`) | No |
 
 ```bash
 # Exact phrase (default)
@@ -266,6 +267,9 @@ srchigh "divorce custody" 5 --mode any
 
 # All words (AND) with proximity 40 (default)
 srchigh "divorce custody" 5 --mode all
+
+# Boolean operators
+srchigh "murder AND bail" 5 --scr --mode boolean
 
 # All words with custom proximity (words must be within 20 of each other)
 srchigh "divorce custody" 5 --mode all --proximity 20
