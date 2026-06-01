@@ -21,9 +21,10 @@ import os
 import re
 import asyncio
 import logging
+from .log_setup import setup_logging
 
-logging.basicConfig(level=logging.INFO, format="%(message)s")
-log = logging.getLogger(__name__)
+is_verbose = "-v" in sys.argv or "--verbose" in sys.argv
+log = setup_logging(verbose=is_verbose)
 
 from .config import (
     COURT_NAMES, MODE_LABELS, DOWNLOADS_PER_SESSION,
@@ -52,6 +53,7 @@ def parse_args():
         "neu_no": "", "sel_lang": "",
         "sci": False,
         "month_sci": "", "year_sci": "",
+        "bulk_dump": False,
     }
     pos = 0
     i = 0
@@ -109,8 +111,20 @@ def parse_args():
             p["sel_lang"] = args[i + 1]; i += 2
         elif a == "--all":
             p["all"] = True; i += 1
+        elif a == "--all-words":
+            p["mode"] = "ALL"
+            if not p["proximity"]: p["proximity"] = "40"
+            i += 1
+        elif a == "--any":
+            p["mode"] = "ANY"; i += 1
+        elif a == "--boolean":
+            p["mode"] = "BOOLEAN"; i += 1
+        elif a in ("--verbose", "-v"):
+            p["verbose"] = True; i += 1
         elif a == "--dump-all":
             p["dump_all"] = True; i += 1
+        elif a == "--bulk-dump":
+            p["bulk_dump"] = True; i += 1
         elif a == "--no-download":
             p["no_dl"] = True; i += 1
         elif a == "--download-db":
@@ -123,6 +137,8 @@ def parse_args():
             p["export_csv"] = args[i + 1]; i += 2
         elif a == "--out" and i + 1 < len(args):
             p["out"] = args[i + 1]; i += 2
+        elif a == "--clear-db":
+            p["clear_db"] = True; i += 1
         elif a == "--version":
             print("srchigh v%s" % __version__)
             sys.exit(0)
@@ -137,63 +153,86 @@ def parse_args():
             pos += 1
             i += 1
 
-    if not p["search"] and not p.get("dump_all") and not p["download_db"] and not p["status"] and not p["export_csv"] and not p.get("sci"):
+    # Fix for `srchigh scr --dump-all` interpreting "scr" as search term
+    if (p.get("dump_all") or p.get("bulk_dump")) and p["search"].lower() == "scr":
+        p["scr"] = True
+        p["search"] = ""
+
+    if p.get("bulk_dump"):
+        p["search"] = ""
+        p["all"] = True
+        p["no_dl"] = True  # Default to metadata only for bulk dump unless overridden
+        # We can let the user override with a future flag, but safety first.
+
+    if not p["search"] and not p.get("dump_all") and not p.get("bulk_dump") and not p["download_db"] and not p["status"] and not p.get("export_csv") and not p.get("sci") and not p.get("clear_db"):
         court_list = ", ".join(sorted(COURT_NAMES.keys()))
-        print("Usage: python3 main.py <search_term> [count] [options]")
-        print("")
-        print("  Search sources:")
-        print("    (default)            High Courts via eCourts portal")
-        print("    --scr                Supreme Court Reports (SCR) portal")
-        print("    --sci                SCI Judgment Date portal")
-        print("")
-        print("  Search options:")
-        print("    --mode PHRASE|ANY|ALL|BOOLEAN Search mode (default: PHRASE)")
-        print("    --proximity N           Word proximity for ALL mode (20-100)")
-        print("    --page N                Page number (default: 0)")
-        print("    --pages M:N             Page range")
-        print("    --all                   Fetch ALL matching results")
-        print("    --dump-all              Fetch EVERY judgment (no search term needed)")
-        print("")
-        print("  High Court filters:")
-        print("    --court NAME            Filter by High Court (%s)" % court_list)
-        print("    --state CODE            Filter by state code")
-        print("    --judge NAME            Filter by judge name")
-        print("    --from DATE             Start date DD-MM-YYYY")
-        print("    --to DATE               End date DD-MM-YYYY")
-        print("")
-        print("  SCR filters:")
-        print("    --citation-year YYYY    Citation year")
-        print("    --citation-vol N        Citation volume")
-        print("    --citation-supl SUPPL   Citation supplement")
-        print("    --citation-page N       Citation page")
-        print("    --ncn CODE              Neutral citation number")
-        print("    --neu-cit-year YYYY     Neutral citation year")
-        print("    --neu-no N              Neutral citation number")
-        print("    --sel-lang CODE         Language")
-        print("")
-        print("  SCI options:")
-        print("    --from DATE             Start date DD-MM-YYYY")
-        print("    --to DATE               End date DD-MM-YYYY")
-        print("    --month MM-YYYY         Month to download")
-        print("    --year YYYY             Year to download")
-        print("    (max 30-day range per request, auto-split into chunks)")
-        print("")
-        print("  Output options:")
-        print("    --dump-all              Fetch EVERY judgment (no search term needed)")
-        print("    --no-download           Skip PDF download, store in DB only")
-        print("    --csv                   Export search results directly to CSV")
-        print("    --download-db           Download pending PDFs from DB")
-        print("    --status                Show DB status for a search term")
-        print("    --export-csv PATH       Export DB results to CSV")
-        print("    --out DIR               Output directory")
+        log.info("Usage: python3 main.py <search_term> [count] [options]")
+        log.info("")
+        log.info("  Search sources:")
+        log.info("    (default)            High Courts via eCourts portal")
+        log.info("    --scr                Supreme Court Reports (SCR) portal")
+        log.info("    --sci                SCI Judgment Date portal")
+        log.info("")
+        log.info("  Search options:")
+        log.info("    --mode PHRASE|ANY|ALL|BOOLEAN Search mode (default: PHRASE)")
+        log.info("    --all-words             Match all words in text")
+        log.info("    --any                   Match any word in text")
+        log.info("    --boolean               Use boolean search (e.g., 'murder AND theft')")
+        log.info("    --proximity N           Max words between terms (for ALL mode, default 40)")
+        log.info("    --page N                Page number (default: 0)")
+        log.info("    --pages M:N             Page range")
+        log.info("    --all                   Fetch ALL matching results (all pages)")
+        log.info("    --dump-all              Fetch EVERY judgment (no search term needed)")
+        log.info("    --bulk-dump             Dump ENTIRE database (organized by year, metadata first)")
+        log.info("    --verbose, -v           Enable detailed debug output")
+        log.info("")
+        log.info("  High Court filters:")
+        log.info("    --court NAME            Filter by High Court (%s)" % court_list)
+        log.info("    --state CODE            Filter by state code")
+        log.info("    --judge NAME            Filter by judge name")
+        log.info("    --from DATE             Start date DD-MM-YYYY")
+        log.info("    --to DATE               End date DD-MM-YYYY")
+        log.info("")
+        log.info("  SCR filters:")
+        log.info("    --citation-year YYYY    Citation year")
+        log.info("    --citation-vol N        Citation volume")
+        log.info("    --citation-supl SUPPL   Citation supplement")
+        log.info("    --citation-page N       Citation page")
+        log.info("    --ncn CODE              Neutral citation number")
+        log.info("    --neu-cit-year YYYY     Neutral citation year")
+        log.info("    --neu-no N              Neutral citation number")
+        log.info("    --sel-lang CODE         Language")
+        log.info("")
+        log.info("  SCI options:")
+        log.info("    --from DATE             Start date DD-MM-YYYY")
+        log.info("    --to DATE               End date DD-MM-YYYY")
+        log.info("    --month MM-YYYY         Month to download")
+        log.info("    --year YYYY             Year to download")
+        log.info("    (max 30-day range per request, auto-split into chunks)")
+        log.info("")
+        log.info("  Output options:")
+        log.info("    --dump-all              Fetch EVERY judgment (no search term needed)")
+        log.info("    --no-download           Skip PDF download, store in DB only")
+        log.info("    --csv                   Export search results directly to CSV")
+        log.info("    --download-db           Download pending PDFs from DB")
+        log.info("    --status                Show DB status for a search term")
+        log.info("    --clear-db              Clear the local SQLite database")
+        log.info("    --export-csv PATH       Export DB results to CSV")
+        log.info("    --out DIR               Output directory")
         sys.exit(1)
 
-    if not p["out"] and (p["search"] or p.get("dump_all")):
-        safe = re.sub(r"[^a-zA-Z0-9]+", "_", p["search"]).strip("_").lower() or "_all_judgments"
-        if p.get("scr"):
-            p["out"] = os.path.join(os.path.expanduser("~/myJud"), "scr", safe)
+    if not p["out"] and (p["search"] or p.get("dump_all") or p.get("bulk_dump")):
+        if p.get("bulk_dump"):
+            if p.get("scr"):
+                p["out"] = os.path.join(os.path.expanduser("~/myJud"), "dump", "scr")
+            else:
+                p["out"] = os.path.join(os.path.expanduser("~/myJud"), "dump", "ecourts")
         else:
-            p["out"] = os.path.join(os.path.expanduser("~/myJud"), safe)
+            safe = re.sub(r"[^a-zA-Z0-9]+", "_", p["search"]).strip("_").lower() or "_all_judgments"
+            if p.get("scr"):
+                p["out"] = os.path.join(os.path.expanduser("~/myJud"), "scr", safe)
+            else:
+                p["out"] = os.path.join(os.path.expanduser("~/myJud"), safe)
 
     return p
 
@@ -251,7 +290,22 @@ async def download_page(ec, page_num, page_size, search_term, out_dir, downloade
             dl_count += 1
             continue
 
-        filename = os.path.join(out_dir, cnr + ".pdf")
+        # For bulk dump, route to year subdirectories
+        file_out_dir = out_dir
+        if P.get("bulk_dump"):
+            # Try to get year from citation or decision date
+            year = ""
+            if P.get("scr") and e.get("citation_year"):
+                year = e.get("citation_year")
+            elif e.get("decision_date"):
+                year = e.get("decision_date").split("-")[-1]
+            if not year or len(year) != 4:
+                year = "unknown_year"
+            file_out_dir = os.path.join(out_dir, year)
+            if not os.path.exists(file_out_dir):
+                os.makedirs(file_out_dir, exist_ok=True)
+
+        filename = os.path.join(file_out_dir, cnr + ".pdf")
         if os.path.exists(filename) and os.path.getsize(filename) > 1000:
             downloaded_cnrs.add(cnr)
             dl_count += 1
@@ -305,9 +359,9 @@ async def run_search():
     if P["all"]:
         modes.append("ALL RESULTS")
 
-    print("=" * 60)
-    print("  srchigh — %s" % source_name)
-    print("  Search: '%s'  |  %s" % (P["search"], " + ".join(modes)))
+    log.info("=" * 60)
+    log.info("  srchigh — %s" % source_name)
+    log.info("  Search: '%s'  |  %s" % (P["search"], " + ".join(modes)))
     parts = []
     if P["court"]: parts.append("court=" + P["court"])
     if P["state"]: parts.append("state=" + P["state"])
@@ -318,16 +372,16 @@ async def run_search():
         scr_display = _build_scr_params()
         for k, v in scr_display.items():
             parts.append("%s=%s" % (k, v))
-    if parts: print("  Filters: " + ", ".join(parts))
-    print("  Output:  " + P["out"])
-    print("=" * 60)
+    if parts: log.info("  Filters: " + ", ".join(parts))
+    log.info("  Output:  " + P["out"])
+    log.info("=" * 60)
 
     fcourt = "3" if is_scr else "2"
     ec = ECourtSession(base_url=base_url, fcourt_type=fcourt)
-    print("")
-    print("[1] Establishing session...")
+    log.info("")
+    log.info("[1] Establishing session...")
     await ec.client.get(base_url)
-    print("[2] Solving captcha...")
+    log.info("[2] Solving captcha...")
     court_code = ""
     if not is_scr and P["court"]:
         court_code = str(COURT_NAMES.get(P["court"], ""))
@@ -338,14 +392,14 @@ async def run_search():
                     break
     P["state"] = court_code or P["state"]
     captcha_text, token = await ec.solve_captcha(search_text=P["search"], search_opt=P["mode"])
-    print("     Token: " + token[:16] + "...")
-    print("[3] Loading search page...")
+    log.debug("     Token: " + token[:16] + "...")
+    log.info("[3] Loading search page...")
     await ec.load_results_page(P["search"], mode=P["mode"])
 
     scr_params = _build_scr_params()
     page_size = min(P["count"], 25)
     if P["all"]:
-        page_size = 200
+        page_size = ALL_PAGE_SIZE
     for _ in range(3):
         await ec.get_results(P["search"], page=0, page_size=page_size, mode=P["mode"],
                              state_code=P["state"], proximity=P["proximity"],
@@ -360,7 +414,7 @@ async def run_search():
     total_pages = 0
     if P["all"]:
         total_pages = (total // page_size) + 1 if total else 1
-        total_pages = min(total_pages, 500)
+        total_pages = min(total_pages, MAX_PAGES_ALL)
         pages_to_fetch = list(range(total_pages))
     elif P["pages"]:
         pages_to_fetch = list(range(P["pages"][0], P["pages"][1]))
@@ -369,19 +423,19 @@ async def run_search():
         pages_to_fetch = [P["page"]]
         total_pages = 1
 
-    print("")
-    print("  " + "─" * 45)
-    print("    Total matching:  %s" % ("{:,}".format(total) if total else "?"))
-    print("    Page size:       %d per page" % page_size)
-    print("    Total pages:     %d" % total_pages)
-    print("    Max downloads:   %d" % (total_pages * page_size))
+    log.info("")
+    log.info("  " + "─" * 45)
+    log.info("    Total matching:  %s" % ("{:,}".format(total) if total else "?"))
+    log.info("    Page size:       %d per page" % page_size)
+    log.info("    Total pages:     %d" % total_pages)
+    log.info("    Max downloads:   %d" % (total_pages * page_size))
     if P["all"] and total:
         eta = total_pages * page_size * 2
         if eta > 120:
-            print("    Est. time:       ~%d min" % (eta // 60))
+            log.info("    Est. time:       ~%d min" % (eta // 60))
         else:
-            print("    Est. time:       ~%d sec" % eta)
-    print("  " + "─" * 45)
+            log.info("    Est. time:       ~%d sec" % eta)
+    log.info("  " + "─" * 45)
 
     downloaded_cnrs = set()
     if os.path.exists(P["out"]):
@@ -390,11 +444,11 @@ async def run_search():
                 downloaded_cnrs.add(f[:-4])
         log.info("     Already have %d PDFs in %s/" % (len(downloaded_cnrs), P["out"]))
 
-    print("")
-    print("[4] Fetching %d page(s)..." % len(pages_to_fetch))
+    log.info("")
+    log.info("[4] Fetching %d page(s)..." % len(pages_to_fetch))
     total_dl = 0
     dl_since_refresh = 0
-    all_entries = []
+    total_entries_stored = 0
 
     for pg in pages_to_fetch:
         try:
@@ -403,7 +457,18 @@ async def run_search():
             )
             total_dl += dl_count
             dl_since_refresh += dl_count
-            all_entries.extend(page_entries)
+            
+            if page_entries:
+                cnrs = [e.get("cnr") for e in page_entries if e.get("cnr")]
+                source = "scr" if P.get("scr") else "ecourts"
+                existing = await db.check_existing_cnrs(cnrs, P["search"], source=source)
+                
+                await db.insert_judgments_batch(page_entries, P["search"], source=source)
+                total_entries_stored += len(page_entries)
+                
+                if (P.get("all") or P.get("bulk_dump")) and existing >= len(page_entries) and len(page_entries) > 0:
+                    log.info("  [Incremental] All %d cases on page already in DB. Stopping early." % existing)
+                    break
 
             if not P["no_dl"] and dl_since_refresh >= 20:
                 log.info("  === Rotating session (%d downloads) ===" % 20)
@@ -424,25 +489,24 @@ async def run_search():
                 await ec.load_results_page(P["search"], captcha=ct, mode=P["mode"])
                 dl_since_refresh = 0
 
-    if all_entries:
-        source = "scr" if P.get("scr") else "ecourts"
-        await db.insert_judgments_batch(all_entries, P["search"], source=source)
+    if total_entries_stored > 0:
         await db.upsert_search(P["search"], P["mode"], P["court"], total)
-        log.info("  Stored %d entries in DB" % len(all_entries))
+        log.info("  Stored %d entries in DB" % total_entries_stored)
 
     await ec.close()
 
-    print("")
-    print("=" * 60)
+    log.info("")
+    log.info("=" * 60)
     if P["no_dl"]:
-        print("  Done! %d results stored in DB. Use --download-db to download PDFs." % len(all_entries))
+        log.info("  Done! %d results fetched. Use --download-db to download PDFs." % total_entries_stored)
     else:
-        print("  Done! %d PDF(s) downloaded to %s/" % (total_dl, P["out"]))
-    if P["csv"] and all_entries:
+        log.info("  Done! %d PDF(s) downloaded to %s/" % (total_dl, P["out"]))
+    if P["csv"]:
         out_csv = os.path.join(P["out"], "_results.csv")
-        await db.export_to_csv(P["search"], out_csv)
-        print("  Results exported to %s" % out_csv)
-    print("=" * 60)
+        source = "scr" if P.get("scr") else "ecourts"
+        await db.export_to_csv(P["search"], out_csv, source=source)
+        log.info("  Results exported to %s" % out_csv)
+    log.info("=" * 60)
 
 
 def _resolve_sci_dates():
@@ -474,30 +538,30 @@ async def run_sci_search():
         log.error("from_date must be before to_date")
         return
 
-    print("=" * 60)
-    print("  srchigh — SCI Judgment Date")
-    print("  Range: %s  →  %s" % (_fmt_date(from_dt), _fmt_date(to_dt)))
+    log.info("=" * 60)
+    log.info("  srchigh — SCI Judgment Date")
+    log.info("  Range: %s  →  %s" % (_fmt_date(from_dt), _fmt_date(to_dt)))
     base_out = os.path.expanduser("~/myJud/sci")
-    print("  Output: %s/" % base_out)
-    print("=" * 60)
+    log.info("  Output: %s/" % base_out)
+    log.info("=" * 60)
 
     chunks = _split_date_range(from_dt, to_dt)
-    print("\n  Splitting into %d chunk(s) (max %d days each)" % (len(chunks), 30))
+    log.info("\n  Splitting into %d chunk(s) (max %d days each)" % (len(chunks), 30))
 
     total_downloaded = 0
     total_found = 0
 
     for chunk_idx, (chunk_from, chunk_to) in enumerate(chunks, 1):
-        print("\n" + "─" * 50)
-        print("  Chunk %d/%d: %s  →  %s" % (chunk_idx, len(chunks),
+        log.info("\n" + "─" * 50)
+        log.info("  Chunk %d/%d: %s  →  %s" % (chunk_idx, len(chunks),
                                                _fmt_date(chunk_from), _fmt_date(chunk_to)))
 
         ec = SCISession()
-        print("  [1] Fetching homepage...")
+        log.info("  [1] Fetching homepage...")
         await ec.fetch_homepage()
-        print("  [2] Solving captcha...")
+        log.info("  [2] Solving captcha...")
         await ec.solve_captcha()
-        print("  [3] Searching...")
+        log.info("  [3] Searching...")
         # Retry search with fresh captcha on captcha failure
         entries = []
         captcha_failed = False
@@ -506,26 +570,26 @@ async def run_sci_search():
             if captcha_ok:
                 break
             captcha_failed = True
-            print("    Captcha rejected, retrying with fresh session...")
+            log.debug("    Captcha rejected, retrying with fresh session...")
             await ec.fresh()
             await ec.solve_captcha()
 
         if not entries:
             if captcha_failed:
-                print("  No results after captcha retries exhausted.")
+                log.info("  No results after captcha retries exhausted.")
             else:
-                print("  No judgments found for this date range.")
+                log.info("  No judgments found for this date range.")
             await ec.close()
             continue
 
         total_found += len(entries)
-        print("  Found %d judgment(s)" % len(entries))
+        log.info("  Found %d judgment(s)" % len(entries))
 
         for idx, entry in enumerate(entries, 1):
             diary_no = entry.get("diary_no", "")
             pdf_url = entry.get("pdf_url", "")
             label = entry.get("case_no", "") or entry.get("diary_no", "")
-            print("\n  [%d/%d] %s" % (idx, len(entries), label))
+            log.debug("\n  [%d/%d] %s" % (idx, len(entries), label))
 
             # Extract judgment date from PDF filename like "..._Judgement_02-Jan-2024.pdf"
             dec_date = ""
@@ -547,43 +611,48 @@ async def run_sci_search():
 
             # Skip if already downloaded
             if os.path.exists(pdf_path) and os.path.getsize(pdf_path) > 1000:
-                print("    Already exists, skipping")
+                log.debug("    Already exists, skipping")
                 continue
 
             if pdf_url:
-                print("    Downloading PDF...")
+                log.debug("    Downloading PDF...")
                 sz = await ec.download_pdf(pdf_url, pdf_path)
                 if sz > 1000:
-                    print("    OK (%d bytes)" % sz)
+                    log.debug("    OK (%d bytes)" % sz)
                     total_downloaded += 1
                 else:
-                    print("    Failed (empty or invalid)")
+                    log.debug("    Failed (empty or invalid)")
             else:
-                print("    No PDF URL found in details")
+                log.debug("    No PDF URL found in details")
 
         await ec.close()
 
-    print("\n" + "=" * 60)
-    print("  Done! %d PDF(s) downloaded to %s/" % (total_downloaded, base_out))
-    print("  Total judgments found: %d" % total_found)
+    log.info("\n" + "=" * 60)
+    log.info("  Done! %d PDF(s) downloaded to %s/" % (total_downloaded, base_out))
+    log.info("  Total judgments found: %d" % total_found)
     if P["csv"] and total_found:
-        out_csv = os.path.join(base_out, "_results.csv")
-        await db.export_to_csv(P.get("search", ""), out_csv)
-        print("  Results exported to %s" % out_csv)
-    print("=" * 60)
+        if P.get("out"):
+            out_csv = os.path.join(P["out"], "_results.csv")
+        else:
+            safe_term = re.sub(r"[^a-zA-Z0-9]+", "_", P.get("search", "")).strip("_").lower() or "all_judgments"
+            out_csv = os.path.join(os.path.expanduser("~/myJud"), safe_term, "_results.csv")
+        source = "scr" if P.get("scr") else "ecourts"
+        await db.export_to_csv(P.get("search", ""), out_csv, source=source)
+        log.info("  CSV exported to: %s" % out_csv)
+    log.info("=" * 60)
 
 
 async def run_download_db():
     await db.init_db()
-    print("=" * 60)
-    print("  eCourts India — Download from DB")
-    print("=" * 60)
-    print("")
+    log.info("=" * 60)
+    log.info("  eCourts India — Download from DB")
+    log.info("=" * 60)
+    log.info("")
     await download_from_db(search_term=P.get("search", ""), out_dir=P.get("out"))
-    print("")
-    print("=" * 60)
-    print("  Done!")
-    print("=" * 60)
+    log.info("")
+    log.info("=" * 60)
+    log.info("  Done!")
+    log.info("=" * 60)
 
 
 async def run_status():
@@ -591,19 +660,19 @@ async def run_status():
     search_term = P.get("search", "")
     stats = await db.get_stats(search_term)
     entries = await db.get_all_judgments(search_term) if search_term else []
-    print("=" * 60)
-    print("  DB Status for: %s" % (search_term or "all searches"))
-    print("=" * 60)
-    print("  Total judgments:  %d" % stats["total"])
-    print("  Downloaded:      %d" % stats["downloaded"])
-    print("  Pending:         %d" % stats["pending"])
+    log.info("=" * 60)
+    log.info("  DB Status for: %s" % (search_term or "all searches"))
+    log.info("=" * 60)
+    log.info("  Total judgments:  %d" % stats["total"])
+    log.info("  Downloaded:      %d" % stats["downloaded"])
+    log.info("  Pending:         %d" % stats["pending"])
     if entries:
-        print("")
-        print("  Recent entries:")
+        log.info("")
+        log.info("  Recent entries:")
         for e in entries[:10]:
             dl = "✓" if e.get("downloaded") else "✗"
-            print("    [%s] %s | %s" % (dl, e.get("cnr", "?"), e.get("case_title", "?")[:50]))
-    print("=" * 60)
+            log.info("    [%s] %s | %s" % (dl, e.get("cnr", "?"), e.get("case_title", "?")[:50]))
+    log.info("=" * 60)
 
 
 async def run_export_csv():
@@ -629,6 +698,19 @@ async def run_cli():
 
     P = parse_args()
     P = apply_config_to_params(P)
+
+    if P.get("clear_db"):
+        log.info("Clearing database...")
+        import aiosqlite
+        from srchigh.db import DB_PATH
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute("DELETE FROM judgments")
+            await db.execute("DELETE FROM searches")
+            await db.execute("DELETE FROM download_log")
+            await db.commit()
+            await db.execute("VACUUM")
+        log.info("Database cleared successfully!")
+        sys.exit(0)
 
     if P.get("sci"):
         await run_sci_search()

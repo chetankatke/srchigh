@@ -9,8 +9,11 @@ import io
 import json
 import re
 import asyncio
+import logging
 from collections import Counter
 from urllib.parse import urlparse
+
+log = logging.getLogger("srchigh")
 
 import httpx
 from PIL import Image, ImageFilter
@@ -88,15 +91,15 @@ class ECourtSession:
     async def solve_captcha(self, search_text="test", search_opt="PHRASE",
                             court_type=None, max_tries=30):
         for attempt in range(1, max_tries + 1):
-            print(f"\n\033[1;36m┌── Captcha Attempt {attempt}/{max_tries} ──────────────────────────────────────┐\033[0m", flush=True)
+            log.debug(f"\n\033[1;36m┌── Captcha Attempt {attempt}/{max_tries} ──────────────────────────────────────┐\033[0m")
             try:
                 cr = await self._get("vendor/securimage/securimage_show.php")
                 img = Image.open(io.BytesIO(cr.content)).convert("L")
-                print("    \033[1;33mDownloaded Captcha Image:\033[0m", flush=True)
-                print(self._render_image_to_ascii(img), flush=True)
+                log.debug("    \033[1;33mDownloaded Captcha Image:\033[0m")
+                log.debug(self._render_image_to_ascii(img))
             except Exception as e:
-                print(f"    \033[1;31mError fetching/parsing captcha image: {e}\033[0m", flush=True)
-                print("\033[1;36m└──────────────────────────────────────────────────────────────────┘\033[0m", flush=True)
+                log.debug(f"    \033[1;31mError fetching/parsing captcha image: {e}\033[0m")
+                log.debug("\033[1;36m└──────────────────────────────────────────────────────────────────┘\033[0m")
                 continue
 
             # Enhance image for better OCR: upscale 2x and apply median filter to reduce background noise
@@ -120,27 +123,27 @@ class ECourtSession:
                 else:
                     guesses_by_thresh[thresh] = f"{text} (ignored, len={len(text)})"
 
-            print("    \033[1;34mStep 1: Preprocessing & OCR Thresholds:\033[0m", flush=True)
+            log.debug("    \033[1;34mStep 1: Preprocessing & OCR Thresholds:\033[0m")
             for thresh in sorted(guesses_by_thresh.keys()):
                 val = guesses_by_thresh[thresh]
                 if val in guesses:
-                    print(f"      Threshold {thresh:03d} -> \033[1;32m'{val}'\033[0m (valid length)", flush=True)
+                    log.debug(f"      Threshold {thresh:03d} -> \033[1;32m'{val}'\033[0m (valid length)")
                 else:
-                    print(f"      Threshold {thresh:03d} -> \033[90m'{val}'\033[0m", flush=True)
+                    log.debug(f"      Threshold {thresh:03d} -> \033[90m'{val}'\033[0m")
 
             if not guesses:
-                print("    \033[1;31mNo valid OCR guesses found for this attempt.\033[0m", flush=True)
-                print("\033[1;36m└──────────────────────────────────────────────────────────────────┘\033[0m", flush=True)
+                log.debug("    \033[1;31mNo valid OCR guesses found for this attempt.\033[0m")
+                log.debug("\033[1;36m└──────────────────────────────────────────────────────────────────┘\033[0m")
                 continue
 
             # Sort guesses by how many thresholds produced them (consensus first)
             guess_counts = Counter(v for v in guesses_by_thresh.values() if v in guesses)
             sorted_guesses = sorted(guesses, key=lambda g: (-guess_counts.get(g, 0), g))
 
-            print("    \033[1;34mStep 2: Validating guesses against server:\033[0m", flush=True)
+            log.debug("    \033[1;34mStep 2: Validating guesses against server:\033[0m")
             for guess in sorted_guesses:
                 try:
-                    print(f"      Testing guess \033[1;35m'{guess}'\033[0m ... ", end="", flush=True)
+                    # Using log.debug doesn't support 'end=""', so we combine it into one message based on the result
                     r = await self._post("?p=pdf_search/checkCaptcha", data={
                         "captcha": guess,
                         "search_text": search_text,
@@ -151,18 +154,18 @@ class ECourtSession:
                     })
                     j = json.loads(r.text)
                     if j.get("captcha_status") == "Y":
-                        print("\033[1;32m✓ ACCEPTED!\033[0m", flush=True)
+                        log.debug(f"      Testing guess \033[1;35m'{guess}'\033[0m ... \033[1;32m✓ ACCEPTED!\033[0m")
                         self.app_token = j.get("app_token", "")
                         self.captcha_text = guess
-                        print(f"\033[1;32m    ★ Successfully solved: '{guess}'\033[0m", flush=True)
-                        print("\033[1;36m└──────────────────────────────────────────────────────────────────┘\033[0m", flush=True)
+                        log.debug(f"\033[1;32m    ★ Successfully solved: '{guess}'\033[0m")
+                        log.debug("\033[1;36m└──────────────────────────────────────────────────────────────────┘\033[0m")
                         return guess, self.app_token
                     else:
-                        print("\033[1;31m✗ Rejected\033[0m", flush=True)
+                        log.debug(f"      Testing guess \033[1;35m'{guess}'\033[0m ... \033[1;31m✗ Rejected\033[0m")
                 except (json.JSONDecodeError, Exception) as e:
-                    print(f"\033[1;31mError ({e})\033[0m", flush=True)
+                    log.debug(f"      Testing guess \033[1;35m'{guess}'\033[0m ... \033[1;31mError ({e})\033[0m")
 
-            print("\033[1;36m└──────────────────────────────────────────────────────────────────┘\033[0m", flush=True)
+            log.debug("\033[1;36m└──────────────────────────────────────────────────────────────────┘\033[0m")
             if attempt % 5 == 0:
                 await self.fresh()
 

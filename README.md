@@ -213,6 +213,9 @@ Search sources:
 
 Search options:
   --mode PHRASE|ANY|ALL|BOOLEAN Search mode (default: PHRASE)
+  --all-words           Match all words in text
+  --any                 Match any word in text
+  --boolean             Use boolean search (e.g., 'murder AND theft')
   --proximity N         Word proximity for ALL mode (20-100, default: 40)
   --page N              Page number (default: 0)
   --pages M:N           Page range (e.g. 0:10)
@@ -242,9 +245,11 @@ SCI Judgment Date filters:
 
 Output options:
   --dump-all            Fetch EVERY judgment (no search term needed)
+  --bulk-dump           Dump ENTIRE database (organized by year, metadata first)
   --no-download         Skip PDF download, store in DB only
   --download-db         Download pending PDFs from DB
   --status              Show DB status for a search term
+  --clear-db            Clear the local SQLite database
   --export-csv PATH     Export DB results to CSV
   --out DIR             Output directory
     (default HC: ~/myJud/<search_term>)
@@ -253,30 +258,30 @@ Output options:
 
 ### Search Modes
 
-The eCourts portal supports three search modes, matching the radio buttons on the website:
+The eCourts and SCR portals support multiple search modes, corresponding to the interface options on their websites. You can invoke them explicitly with their standalone flags or via the `--mode` flag:
 
-| Flag | Website Label | Behavior | Proximity? |
+| Flag | Mode equivalent | Behavior | Proximity? |
 |---|---|---|---|
-| `--mode PHRASE` (default) | **Phrase(s)** | Exact phrase match — "divorce custody" finds that exact phrase | No |
-| `--mode ANY` | **Any Words** | OR search — finds judgments with "divorce" OR "custody" | No |
-| `--mode ALL` | **All Words** | AND search — finds judgments with "divorce" AND "custody" | Yes, default 40 |
-| `--mode BOOLEAN` | **(Hidden/Advanced)** | Advanced search using `AND`, `OR` in caps (e.g. `murder AND bail`) | No |
+| (default) | `--mode PHRASE` | Exact phrase match — "divorce custody" finds that exact phrase | No |
+| `--any` | `--mode ANY` | OR search — finds judgments with "divorce" OR "custody" | No |
+| `--all-words` | `--mode ALL` | AND search — finds judgments with "divorce" AND "custody" | Yes, default 40 |
+| `--boolean` | `--mode BOOLEAN` | Advanced search using `AND`, `OR` in caps (e.g. `murder AND bail`) | No |
 
 ```bash
 # Exact phrase (default)
 srchigh "anticipatory bail" 5
 
 # Any word (OR)
-srchigh "divorce custody" 5 --mode any
+srchigh "divorce custody" 5 --any
 
 # All words (AND) with proximity 40 (default)
-srchigh "divorce custody" 5 --mode all
+srchigh "divorce custody" 5 --all-words
 
 # Boolean operators
-srchigh "murder AND bail" 5 --scr --mode boolean
+srchigh "murder AND bail" 5 --scr --boolean
 
 # All words with custom proximity (words must be within 20 of each other)
-srchigh "divorce custody" 5 --mode all --proximity 20
+srchigh "divorce custody" 5 --all-words --proximity 20
 ```
 
 **Proximity** controls how close the words must be in the judgment text. Values: 20, 40, 60, 80, 100. Lower = closer. Only applies to `--mode ALL`.

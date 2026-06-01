@@ -172,11 +172,11 @@ class SCISession:
         ocr = ddddocr.DdddOcr(show_ad=False)
         for attempt in range(1, max_tries + 1):
             url = CAPTCHA_URL + self.scid
-            print(f"\n\033[1;36m┌── Captcha Attempt {attempt}/{max_tries} ──────────────────────────────────────┐\033[0m", flush=True)
+            log.debug(f"\n\033[1;36m┌── Captcha Attempt {attempt}/{max_tries} ──────────────────────────────────────┐\033[0m")
             try:
                 cr = await self._get(url)
             except Exception as e:
-                print(f"    \033[1;31mError fetching captcha: {e}\033[0m", flush=True)
+                log.debug(f"    \033[1;31mError fetching captcha: {e}\033[0m")
                 if attempt % 5 == 0:
                     await self.fresh()
                 continue
@@ -186,13 +186,13 @@ class SCISession:
             answer = self._solve_math_captcha(result)
 
             if answer is None:
-                print(f"    ddddocr read: \033[90m'{result}'\033[0m (could not parse)", flush=True)
+                log.debug(f"    ddddocr read: \033[90m'{result}'\033[0m (could not parse)")
                 if attempt % 5 == 0:
                     await self.fresh()
                 continue
 
-            print(f"    \033[1;32mMath captcha solved: '{result}' = {answer}\033[0m", flush=True)
-            print("\033[1;36m└──────────────────────────────────────────────────────────────────┘\033[0m", flush=True)
+            log.debug(f"    \033[1;32mMath captcha solved: '{result}' = {answer}\033[0m")
+            log.debug("\033[1;36m└──────────────────────────────────────────────────────────────────┘\033[0m")
             self.captcha_text = answer
             return self.captcha_text
 

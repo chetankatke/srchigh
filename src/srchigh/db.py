@@ -129,12 +129,24 @@ async def insert_judgments_batch(entries, search_term="", source="ecourts"):
         await db.commit()
 
 
+async def check_existing_cnrs(cnr_list, search_term="", source="ecourts"):
+    if not cnr_list:
+        return 0
+    async with aiosqlite.connect(DB_PATH) as db:
+        placeholders = ",".join("?" * len(cnr_list))
+        query = f"SELECT COUNT(*) FROM judgments WHERE search_term = ? AND source = ? AND cnr IN ({placeholders})"
+        args = [search_term, source] + cnr_list
+        async with db.execute(query, args) as cur:
+            row = await cur.fetchone()
+            return row[0] if row else 0
+
+
 async def mark_downloaded(cnr, file_size, search_term=""):
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("""
             UPDATE judgments SET downloaded = 1, file_size = ?
-            WHERE cnr = ? AND (search_term = ? OR ? = '')
-        """, (file_size, cnr, search_term, search_term))
+            WHERE cnr = ? AND search_term = ?
+        """, (file_size, cnr, search_term))
         await db.commit()
 
 
@@ -143,18 +155,21 @@ async def get_undownloaded(search_term="", limit=100):
         db.row_factory = aiosqlite.Row
         async with db.execute("""
             SELECT * FROM judgments
-            WHERE downloaded = 0 AND (search_term = ? OR ? = '')
+            WHERE downloaded = 0 AND search_term = ?
             LIMIT ?
-        """, (search_term, search_term, limit)) as cur:
+        """, (search_term, limit)) as cur:
             rows = await cur.fetchall()
             return [dict(r) for r in rows]
 
 
-async def get_all_judgments(search_term="", limit=None, offset=0):
+async def get_all_judgments(search_term="", limit=None, offset=0, source=None):
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
-        sql = "SELECT * FROM judgments WHERE search_term = ? OR ? = ''"
-        args = [search_term, search_term]
+        sql = "SELECT * FROM judgments WHERE search_term = ?"
+        args = [search_term]
+        if source:
+            sql += " AND source = ?"
+            args.append(source)
         if limit:
             sql += " LIMIT ? OFFSET ?"
             args.extend([limit, offset])
@@ -217,13 +232,22 @@ async def log_download(cnr, pdf_path, search_term, success, file_size=0, session
 
 
 
-async def export_to_csv(search_term, out_path):
-    rows = await get_all_judgments(search_term)
+async def export_to_csv(search_term, out_path, source=None):
+    rows = await get_all_judgments(search_term, source=source)
     if not rows:
         return None
-    headers = ["cnr", "case_title", "court", "judge", "reg_date",
-               "decision_date", "disposal_nature", "pdf_path",
-               "source", "downloaded"]
+    
+    if source == "scr":
+        # SCR does not have court or reg_date
+        headers = ["citation", "case_title", "judge", "decision_date", 
+                   "disposal_nature", "pdf_path", "source", "downloaded"]
+        for r in rows:
+            r["citation"] = r.pop("cnr", "")
+    else:
+        headers = ["cnr", "case_title", "court", "judge", "reg_date",
+                   "decision_date", "disposal_nature", "pdf_path",
+                   "source", "downloaded"]
+                   
     import csv
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     with open(out_path, "w", newline="", encoding="utf-8") as f:
@@ -238,7 +262,7 @@ async def get_stats(search_term=""):
         db.row_factory = aiosqlite.Row
         sql = "SELECT downloaded, COUNT(*) as count FROM judgments"
         args = []
-        if search_term:
+        if search_term is not None:
             sql += " WHERE search_term = ?"
             args.append(search_term)
         sql += " GROUP BY downloaded"

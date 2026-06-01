@@ -38,7 +38,7 @@ COURT_NAMES = {v: k for k, v in COURT_CODES.items()}
 MODE_LABELS = {"PHRASE": "Phrase(s)", "ANY": "Any Words", "ALL": "All Words", "BOOLEAN": "Boolean"}
 
 DOWNLOADS_PER_SESSION = 20
-ALL_PAGE_SIZE = 200
+ALL_PAGE_SIZE = 1000
 DEFAULT_PAGE_SIZE = 25
 MAX_PAGES_ALL = 500
 
