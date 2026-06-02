@@ -199,3 +199,61 @@ class TestStats:
             assert stats["pending"] == 1
         finally:
             db.DB_PATH = old_path
+
+
+class TestTimestampIsTimezoneAware:
+    """Regression tests for the datetime.utcnow() deprecation fix.
+
+    Inserted rows, upserted searches, and download_log entries must all
+    store timezone-aware ISO 8601 timestamps.
+    """
+
+    @pytest.mark.asyncio
+    async def test_insert_judgment_writes_iso_with_utc_suffix(self, tmp_path):
+        from datetime import datetime
+        old_path = db.DB_PATH
+        db.DB_PATH = str(tmp_path / "test.db")
+        try:
+            await db.init_db()
+            await db.insert_judgment(
+                {"cnr": "TS001", "case_title": "X", "path": "p.pdf"},
+                "ts_test",
+            )
+            rows = await db.get_all_judgments("ts_test")
+            created_at = rows[0]["created_at"]
+            # Should be parseable as ISO with timezone (Z or +00:00)
+            parsed = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+            assert parsed.tzinfo is not None, f"Expected tz-aware, got {created_at!r}"
+            assert 2020 < parsed.year < 2100
+        finally:
+            db.DB_PATH = old_path
+
+    @pytest.mark.asyncio
+    async def test_upsert_search_writes_iso_with_utc_suffix(self, tmp_path):
+        from datetime import datetime
+        old_path = db.DB_PATH
+        db.DB_PATH = str(tmp_path / "test.db")
+        try:
+            await db.init_db()
+            await db.upsert_search("term1", "PHRASE", "bombay", 100)
+            row = await db.get_search("term1")
+            parsed = datetime.fromisoformat(row["created_at"].replace("Z", "+00:00"))
+            assert parsed.tzinfo is not None, f"Expected tz-aware, got {row['created_at']!r}"
+        finally:
+            db.DB_PATH = old_path
+
+    @pytest.mark.asyncio
+    async def test_log_download_writes_iso_with_utc_suffix(self, tmp_path):
+        from datetime import datetime
+        old_path = db.DB_PATH
+        db.DB_PATH = str(tmp_path / "test.db")
+        try:
+            await db.init_db()
+            await db.log_download("CNR1", "p.pdf", "term1", True, 1024)
+            async with db.aiosqlite.connect(db.DB_PATH) as conn:
+                async with conn.execute("SELECT downloaded_at FROM download_log") as cur:
+                    row = await cur.fetchone()
+            parsed = datetime.fromisoformat(row[0].replace("Z", "+00:00"))
+            assert parsed.tzinfo is not None, f"Expected tz-aware, got {row[0]!r}"
+        finally:
+            db.DB_PATH = old_path

@@ -5,7 +5,16 @@ Stores judgment records persistently instead of CSV.
 
 import aiosqlite
 import os
-from datetime import datetime
+from datetime import datetime, timezone
+
+
+def _utcnow() -> str:
+    """Timezone-aware UTC ISO 8601 timestamp string.
+
+    Replaces ``datetime.utcnow()`` (deprecated in Python 3.12) with a
+    timezone-aware equivalent that survives future Python releases.
+    """
+    return datetime.now(timezone.utc).isoformat()
 
 DB_PATH = os.path.join(os.path.expanduser("~"), ".config", "srchigh", "judgments.db")
 
@@ -93,7 +102,7 @@ async def insert_judgment(entry, search_term="", downloaded=False, file_size=0, 
             source,
             1 if downloaded else 0,
             file_size,
-            datetime.utcnow().isoformat(),
+            _utcnow(),
         ))
         await db.commit()
 
@@ -115,7 +124,7 @@ async def insert_judgments_batch(entries, search_term="", source="ecourts"):
             source,
             0,
             0,
-            datetime.utcnow().isoformat(),
+            _utcnow(),
         )
         for e in entries
     ]
@@ -197,7 +206,7 @@ async def upsert_search(search_term, mode, court, total_results=0):
                 mode = excluded.mode,
                 court = excluded.court,
                 total_results = COALESCE(excluded.total_results, searches.total_results)
-        """, (search_term, mode, court, total_results, datetime.utcnow().isoformat()))
+        """, (search_term, mode, court, total_results, _utcnow()))
         await db.commit()
 
 
@@ -226,7 +235,7 @@ async def log_download(cnr, pdf_path, search_term, success, file_size=0, session
             INSERT INTO download_log
             (cnr, pdf_path, search_term, downloaded_at, success, file_size, session_cnr)
             VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, (cnr, pdf_path, search_term, datetime.utcnow().isoformat(),
+        """, (cnr, pdf_path, search_term, _utcnow(),
               1 if success else 0, file_size, session_cnr))
         await db.commit()
 
