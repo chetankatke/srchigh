@@ -103,7 +103,13 @@ async def download_from_db(search_term="", out_dir=None, max_results=1000, sourc
     dl_count = 0
     await _run_session(ec, search_term)
 
-    for idx, entry in enumerate(filtered):
+    # Process in chunks; within a chunk we run _download_one concurrently
+    # (the previous version of this loop was serial, defeating the purpose
+    # of the Semaphore). Between chunks we rotate the session if needed.
+    chunk_size = MAX_CONCURRENT
+    for chunk_start in range(0, len(filtered), chunk_size):
+        chunk = filtered[chunk_start : chunk_start + chunk_size]
+
         if dl_count >= DOWNLOADS_PER_SESSION:
             log.info("  === Rotating session (%d downloads) ===" % DOWNLOADS_PER_SESSION)
             await ec.close()
@@ -111,13 +117,17 @@ async def download_from_db(search_term="", out_dir=None, max_results=1000, sourc
             await _run_session(ec, search_term)
             dl_count = 0
 
-        result = await _download_one(sem, ec, entry, out_dir, search_term, stats)
-        if result:
-            dl_count += 1
+        chunk_results = await asyncio.gather(
+            *[_download_one(sem, ec, entry, out_dir, search_term, stats) for entry in chunk]
+        )
+        dl_count += sum(1 for r in chunk_results if r)
 
-        if (idx + 1) % 50 == 0:
+        done = min(chunk_start + chunk_size, len(filtered))
+        if done % 50 == 0 or done == len(filtered):
             log.info("    progress: %d/%d (downloaded=%d, failed=%d, skipped=%d)" % (
-                idx + 1, len(filtered), stats["downloaded"], stats["failed"], stats["skipped"]))
+                done, len(filtered),
+                stats["downloaded"], stats["failed"], stats["skipped"]
+            ))
 
     await ec.close()
     log.info("  Downloaded %d PDFs to %s/ (failed=%d)" % (
