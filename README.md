@@ -374,14 +374,14 @@ srchigh "divorce" 5 --page 100
 # Page range (pages 0 through 4)
 srchigh "divorce" 5 --pages 0:5
 
-# ALL results (up to 12,500 = 500 pages × 25/page)
+# ALL results (up to 500,000 = 500 pages × 1000/page)
 srchigh "divorce" --court bombay --all
 
 # Fetch EVERY judgment in the entire court database
 srchigh --dump-all --court bombay --all --csv --no-download
 ```
 
-With `--all`, the script automatically paginates through every page of results. Page size is set to **200** (for speed) and capped at **500 pages** (12,500 judgments) to avoid abuse.
+With `--all`, the script automatically paginates through every page of results. Page size is set to **1000** and capped at **500 pages** — meaning `--all` can fetch up to **500,000 judgments per run**. Use `--csv --no-download` to avoid filling up your storage.
 
 > [!CAUTION]
 > Using `--dump-all` on High Courts will attempt to fetch over 17.6 million records. It is highly recommended to combine `--dump-all` with `--csv --no-download` to export metadata without filling up your storage with PDFs.
@@ -416,19 +416,21 @@ A two-step workflow for reliable large-scale downloads:
 ```bash
 srchigh "divorce" --court bombay --all --csv --no-download
 ```
-→ Creates `~/myJud/divorce/_results.csv` with up to 12,500 entries
+→ Creates `~/myJud/divorce/_results.csv` with up to 500,000 entries
 
-**Step 2 — Download PDFs from CSV (with session rotation):**
+**Step 2 — Download PDFs (resumable, reads from SQLite):**
 
 ```bash
-srchigh --from-csv ~/myJud/divorce
+srchigh --download-db "divorce"
 ```
 
-This reads the CSV and downloads each PDF using the stored path. Features:
+> **Note:** The v1 documentation referenced `srchigh --from-csv <dir>` for this step. That flag does not exist; the v2 implementation reads from the local SQLite database (`~/.config/srchigh/judgments.db`). The CSV `_results.csv` is still written for human reference / cross-machine resume, but the resumable download path reads SQLite, not the CSV. `--from-csv` is accepted as a deprecated alias for `--download-db` (with a deprecation warning).
+
+This reads the SQLite DB and downloads each PDF using the stored path. Features:
 - Rotates PHP session every 20 downloads (avoids rate-limiting)
 - Skips already-downloaded files (by CNR)
 - Can be interrupted and resumed — re-running skips existing files
-- Works from any machine — just copy the CSV
+- Works from any machine — just copy the SQLite DB
 
 ---
 
@@ -474,23 +476,25 @@ Edit this file to set persistent preferences. For example, setting `"default_cou
 │   ├── __init__.py          # Version
 │   ├── config.py            # Constants, court codes, SCR URLs, first-run detection
 │   ├── session.py           # ECourtSession — captcha, search, PDF download (HC & SCR)
-│   ├── parser.py            # CSS-selector-based HTML parsing (parsel)
-│   ├── export.py            # CSV read/write
-│   ├── download.py          # Batch download (source-aware)
-│   ├── db.py                # SQLite storage with source column
+│   ├── parser.py            # CSS-selector-based HTML parsing (parsel) + make_safe_filename
+│   ├── download.py          # Batch download from SQLite (download_from_db)
+│   ├── db.py                # SQLite storage with source column, timezone-aware timestamps
 │   └── main.py              # CLI entry point + arg parsing
 ├── main.py                  # Convenience runner (python3 main.py)
 ├── pyproject.toml           # Python packaging (single source)
 ├── Makefile                 # make install / make test / make binary
 ├── install.sh               # One-command install script
 ├── README.md                # This file
-└── tests/                   # 74+ tests (pytest)
+└── tests/                   # 166+ tests (pytest)
     ├── conftest.py          # Test fixtures + --network flag logic
     ├── test_config.py       # Court code mappings (8 tests)
-    ├── test_parser.py       # HTML parsing (23 tests)
-    ├── test_export.py       # CSV/DB read/write (10 tests)
-    ├── test_session.py      # Integration tests — real server (10 tests)
-    └── test_smoke.py        # CLI args, imports, flags (20 tests)
+    ├── test_parser.py       # HTML parsing + make_safe_filename + get_court_code (40 tests)
+    ├── test_export.py       # DB CRUD, timestamps, migrations (15 tests)
+    ├── test_sci.py          # SCI pure helpers + table parser (41 tests)
+    ├── test_log_setup.py    # ANSI-stripping (3 tests)
+    ├── test_download.py     # download_from_db concurrency (2 tests)
+    ├── test_session.py      # Integration tests — real server (12 tests, run with --network)
+    └── test_smoke.py        # CLI args, imports, flags (45 tests)
 
 ---
 
@@ -605,7 +609,7 @@ srchigh "2024 AIR 1" 5 --scr --citation-year 2024 --citation-vol 1
 
 ```bash
 srchigh "divorce" --court bombay --all --csv --no-download
-# → ~/myJud/divorce/_results.csv with 11,937 entries
+# → ~/myJud/divorce/_results.csv with up to 500,000 entries
 ```
 
 ### Reliable full download (two-step)
@@ -615,7 +619,7 @@ srchigh "divorce" --court bombay --all --csv --no-download
 srchigh "divorce" --court bombay --all --csv --no-download
 
 # Step 2: Download (with session rotation, resumable)
-srchigh --from-csv ~/myJud/divorce
+srchigh --download-db "divorce"  # or: srchigh --from-csv (deprecated alias)
 ```
 
 ### Filter by date range
@@ -676,7 +680,7 @@ The PHP session expired or the CSRF token is invalid. The script auto-recovers b
 ### "PDF download failed"
 
 Temporary PDF URLs expire. The script retries automatically, but if it consistently fails:
-1. Run `--from-csv` again — it skips already-downloaded files
+1. Run `--download-db` again — it skips already-downloaded files
 2. The eCourts server might be temporarily unavailable
 
 ### Permission errors during install
@@ -693,7 +697,7 @@ python3 main.py "divorce" 5
 
 ## Testing
 
-The project has **74 tests** across unit, smoke, and integration layers.
+The project has **166 tests** across unit, smoke, and integration layers.
 
 ### Run all tests (no network needed for most)
 
@@ -719,11 +723,14 @@ python3 -m pytest tests/test_session.py -v --network
 | Test file | Count | Type | What it covers |
 |---|---|---|---|
 | `test_config.py` | 8 | Unit | Court code mappings, bidirectional lookup |
-| `test_parser.py` | 23 | Unit | HTML parsing, CSS selector extraction |
-| `test_export.py` | 10 | Unit | CSV read/write, headers, edge cases |
-| `test_session.py` | 10 | Integration | Real server: homepage, captcha, search, pagination, PDF download |
-| `test_smoke.py` | 20 | Smoke | Module imports, CLI arg parsing, flag handling |
-| **Total** | **71+** | | |
+| `test_parser.py` | 40 | Unit | HTML parsing, CSS selector extraction, `make_safe_filename`, `get_court_code` edges |
+| `test_export.py` | 15 | Unit | DB CRUD, CSV export, timezone-aware timestamps, migration idempotency |
+| `test_sci.py` | 41 | Unit | `_parse_sci_date`, `_split_date_range`, `_month_range`, `_solve_math_captcha`, `_parse_results_table` |
+| `test_log_setup.py` | 3 | Unit | ANSI-stripping in file handler |
+| `test_download.py` | 2 | Unit | `download_from_db` concurrency + skip-existing |
+| `test_session.py` | 12 | Integration | Real server: homepage, captcha, search, pagination, PDF download (run with `--network`) |
+| `test_smoke.py` | 45 | Smoke | Module imports, CLI arg parsing, all flag combinations |
+| **Total** | **166** | | |
 
 ---
 
@@ -759,7 +766,7 @@ The binary bundles Python, all pip dependencies, and the application code into a
 | `session.py` | HTTP session, captcha solving, search, PDF download | `ECourtSession` |
 | `parser.py` | HTML parsing from DataTable responses | `parse_entry()`, `parse_results_page()` |
 | `export.py` | CSV read/write | `write_results_csv()`, `read_results_csv()` |
-| `download.py` | Batch download from saved CSV | `download_from_csv()` |
+| `download.py` | Batch download from SQLite (`download_from_db()`) | `download_from_db()` |
 | `main.py` | CLI entry point, arg parsing, main orchestration | `run_cli()`, `parse_args()`, `download_page()` |
 
 ### Dependencies
