@@ -261,7 +261,7 @@ class SCISession:
             # Column mapping from actual HTML:
             # 0=Serial No, 1=Diary Number, 2=Case Number, 3=Petitioner/Respondent,
             # 4=Advocate, 5=Bench, 6=Judgment By, 7=Judgment (has PDF links)
-            if len(cells) >= 2:
+            if len(cells) >= 3:
                 entry["case_no"] = re.sub(r'<[^>]+>', '', cells[2]).strip()
             if len(cells) >= 4:
                 entry["case_title"] = re.sub(r'<[^>]+>', '', cells[3]).strip()
