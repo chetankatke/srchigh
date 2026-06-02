@@ -5,12 +5,13 @@ Extracts CNR, case title, court, judge, dates, disposal nature, and PDF path.
 
 import hashlib
 import re
+from typing import Tuple
 from parsel import Selector
 
 
-def parse_entry(html):
+def parse_entry(html: str) -> dict:
     """Parse one judgment HTML cell into a structured dict.
-    
+
     Uses parsel.Selector for robust CSS-based extraction instead of fragile regexes.
     """
     sel = Selector(text=html)
@@ -91,7 +92,7 @@ def parse_entry(html):
     return entry
 
 
-def parse_results_page(json_response):
+def parse_results_page(json_response: dict) -> Tuple[list, int]:
     """Extract entries from a DataTable JSON response."""
     reportrow = json_response.get("reportrow") or {}
     aa_data = reportrow.get("aaData") or []
@@ -103,7 +104,7 @@ def parse_results_page(json_response):
     return entries, total
 
 
-def get_court_code(court_name):
+def get_court_code(court_name: str) -> str:
     """Look up numeric state_code from a court name substring."""
     from .config import COURT_NAMES
 
@@ -114,7 +115,7 @@ def get_court_code(court_name):
     return ""
 
 
-def make_safe_filename(cnr, path, source="ecourts"):
+def make_safe_filename(cnr: str, path: str, source: str = "ecourts") -> str:
     """Return a filesystem-safe filename stem (no extension) for a PDF.
 
     Logic:
