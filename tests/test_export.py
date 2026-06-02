@@ -257,3 +257,39 @@ class TestTimestampIsTimezoneAware:
             assert parsed.tzinfo is not None, f"Expected tz-aware, got {row[0]!r}"
         finally:
             db.DB_PATH = old_path
+
+
+class TestMigration:
+    """init_db() must be idempotent — re-running on an existing DB must not error."""
+
+    @pytest.mark.asyncio
+    async def test_init_db_on_pre_existing_db_is_idempotent(self, tmp_path):
+        old_path = db.DB_PATH
+        db.DB_PATH = str(tmp_path / "test.db")
+        try:
+            await db.init_db()
+            await db.insert_judgment({"cnr": "MIG001", "path": "p.pdf"}, "mig")
+            # Second init_db simulates a version upgrade that re-runs the migration
+            await db.init_db()
+            rows = await db.get_all_judgments("mig")
+            assert len(rows) == 1
+            assert rows[0]["cnr"] == "MIG001"
+        finally:
+            db.DB_PATH = old_path
+
+    @pytest.mark.asyncio
+    async def test_init_db_does_not_overwrite_source_column(self, tmp_path):
+        """The migration ALTER TABLE statements must not change existing values."""
+        old_path = db.DB_PATH
+        db.DB_PATH = str(tmp_path / "test.db")
+        try:
+            await db.init_db()
+            await db.insert_judgment(
+                {"cnr": "MIG002", "path": "p.pdf", "source": "scr"},
+                "mig", source="scr",
+            )
+            await db.init_db()  # Re-run
+            rows = await db.get_all_judgments("mig")
+            assert rows[0]["source"] == "scr"
+        finally:
+            db.DB_PATH = old_path
