@@ -3,6 +3,7 @@ Parse judgment HTML from eCourts DataTable responses using CSS selectors.
 Extracts CNR, case title, court, judge, dates, disposal nature, and PDF path.
 """
 
+import hashlib
 import re
 from parsel import Selector
 
@@ -111,3 +112,24 @@ def get_court_code(court_name):
         if name in key or key in name:
             return str(code)
     return ""
+
+
+def make_safe_filename(cnr, path, source="ecourts"):
+    """Return a filesystem-safe filename stem (no extension) for a PDF.
+
+    Logic:
+    - If ``cnr`` is present and not the literal "N/A", use it with slashes
+      and spaces replaced by underscores.
+    - Otherwise, hash the (source, path) pair with SHA-256 (truncated to 16
+      hex chars) so the same missing-CNR row always gets the same name and
+      different sources/paths get different names (avoids collisions when
+      doing bulk dumps that include both eCourts and SCR entries with
+      overlapping ``path`` values).
+    - Returns ``"unknown"`` if both ``cnr`` and ``path`` are empty.
+    """
+    if cnr and cnr != "N/A":
+        return cnr.replace("/", "_").replace(" ", "_")
+    if not path:
+        return "unknown"
+    h = hashlib.sha256((source + "::" + path).encode("utf-8")).hexdigest()[:16]
+    return f"judgment_{h}"

@@ -277,13 +277,16 @@ async def download_page(ec, page_num, page_size, search_term, out_dir, downloade
     page_entries = []
 
     for e in entries:
-        # SCR: use citation as filename; fall back to CNR; fall back to hash
+        # SCR: use citation as filename; else CNR; else deterministic hash.
         if P.get("scr") and e.get("citation"):
             cnr = e["citation"].replace(" ", "_").replace(".", "").replace(",", "")
         else:
-            cnr = e.get("cnr", "").replace("/", "_").replace(" ", "_")
-        if not cnr or cnr == "N/A":
-            cnr = "judgment_%d" % (hash(e.get("path", "")) % 1000000)
+            from .parser import make_safe_filename
+            cnr = make_safe_filename(
+                e.get("cnr", ""),
+                e.get("path", ""),
+                source="scr" if P.get("scr") else "ecourts",
+            )
 
         page_entries.append(e)
 

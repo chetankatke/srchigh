@@ -140,3 +140,83 @@ class TestGetCourtCode:
 
     def test_bombay_with_extra_spaces(self):
         assert get_court_code("  bombay  ") == "27"
+
+
+class TestGetCourtCodeEdgeCases:
+    def test_partial_substring_match_bombay_in_phrase(self):
+        # get_court_code uses `name in key or key in name`
+        # "bombay high" should match the "bombay" key
+        assert get_court_code("bombay high") == "27"
+
+    def test_unknown_court_returns_empty(self):
+        assert get_court_code("atlantis") == ""
+
+    def test_patna_bihar_exact(self):
+        # Key includes the parenthetical
+        assert get_court_code("patna (bihar)") == "10"
+
+    def test_patna_substring(self):
+        # "patna" appears in "patna (bihar)" so should match
+        assert get_court_code("patna") == "10"
+
+    def test_case_insensitive(self):
+        assert get_court_code("KERALA") == "32"
+        assert get_court_code("KeRaLa") == "32"
+
+    def test_whitespace_stripped(self):
+        assert get_court_code("  delhi  ") == "7"
+
+    def test_empty_string_returns_first_match(self):
+        # Known quirk: "" is a substring of every key, so the loop returns
+        # the first court code (1 = "jammu & kashmir"). Documenting this
+        # behavior; users should not pass empty strings.
+        assert get_court_code("") == "1"
+
+
+class TestMakeSafeFilename:
+    """make_safe_filename — deterministic, collision-free PDF filenames."""
+
+    def test_cnr_used_when_present(self):
+        from srchigh.parser import make_safe_filename
+        assert make_safe_filename("ABC/123/2024", "p.pdf") == "ABC_123_2024"
+
+    def test_n_a_treated_as_missing(self):
+        from srchigh.parser import make_safe_filename
+        result = make_safe_filename("N/A", "some/path.pdf")
+        assert result.startswith("judgment_")
+        assert "N/A" not in result
+
+    def test_missing_cnr_hashes_path(self):
+        from srchigh.parser import make_safe_filename
+        result = make_safe_filename("", "court/orders/HCBM001.pdf")
+        assert result.startswith("judgment_")
+        # sha256 hex[:16] = 16 chars; "judgment_" + 16 = 25 chars
+        assert len(result) == len("judgment_") + 16
+
+    def test_different_sources_dont_collide(self):
+        """Same path under different sources should yield different filenames."""
+        from srchigh.parser import make_safe_filename
+        a = make_safe_filename("", "same.pdf", source="ecourts")
+        b = make_safe_filename("", "same.pdf", source="scr")
+        assert a != b
+
+    def test_same_inputs_yield_same_hash(self):
+        """Determinism — same inputs must always produce same output."""
+        from srchigh.parser import make_safe_filename
+        a = make_safe_filename("", "court/x.pdf", source="sci")
+        b = make_safe_filename("", "court/x.pdf", source="sci")
+        assert a == b
+
+    def test_distinct_paths_yield_distinct_hashes(self):
+        from srchigh.parser import make_safe_filename
+        a = make_safe_filename("", "court/x.pdf", source="ecourts")
+        b = make_safe_filename("", "court/y.pdf", source="ecourts")
+        assert a != b
+
+    def test_both_empty_returns_unknown(self):
+        from srchigh.parser import make_safe_filename
+        assert make_safe_filename("", "") == "unknown"
+
+    def test_whitespace_in_cnr_replaced(self):
+        from srchigh.parser import make_safe_filename
+        assert make_safe_filename("ABC 123 2024", "p.pdf") == "ABC_123_2024"

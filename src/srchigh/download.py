@@ -34,9 +34,12 @@ async def _run_session(ec, search_term):
 
 async def _download_one(sem, ec, entry, out_dir, search_term, stats):
     async with sem:
-        cnr = entry.get("cnr", "")
-        if not cnr:
-            cnr = entry.get("case_title", "?")[:40].replace("/", "_").replace(" ", "_")
+        from .parser import make_safe_filename
+        cnr = make_safe_filename(
+            entry.get("cnr", "") or entry.get("case_title", "?")[:40],
+            entry.get("pdf_path") or entry.get("path", ""),
+            source=entry.get("source", "ecourts"),
+        )
         pdf_path = entry.get("pdf_path") or entry.get("path", "")
 
         filename = os.path.join(out_dir, cnr + ".pdf")
