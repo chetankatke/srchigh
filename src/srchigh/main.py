@@ -129,6 +129,12 @@ def parse_args():
             p["no_dl"] = True; i += 1
         elif a == "--download-db":
             p["download_db"] = True; i += 1
+        elif a == "--from-csv":
+            # Deprecated v1 alias for --download-db. The README still documents
+            # this workflow; the underlying implementation reads from SQLite
+            # (not the CSV), so the old flag is functionally a no-op shortcut.
+            log.warning("--from-csv is deprecated; use --download-db instead")
+            p["download_db"] = True; i += 1
         elif a == "--status":
             p["status"] = True; i += 1
         elif a == "--csv":

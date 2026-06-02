@@ -136,6 +136,18 @@ class TestParseArgs:
         finally:
             _sys.argv = saved
 
+    def test_from_csv_alias_sets_download_db(self):
+        """--from-csv is a deprecated v1 alias for --download-db (README still references it)."""
+        import sys as _sys
+        from srchigh.main import parse_args
+        saved = _sys.argv
+        _sys.argv = ["main.py", "--from-csv", "/tmp/some_csv_dir"]
+        try:
+            p = parse_args()
+            assert p["download_db"] is True
+        finally:
+            _sys.argv = saved
+
     def test_mode_any(self):
         import sys as _sys
         from srchigh.main import parse_args
