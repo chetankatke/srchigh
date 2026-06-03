@@ -19,7 +19,7 @@ Reverse-engineers the [eCourts PDF Search](https://judgments.ecourts.gov.in/pdfs
   - [SCI — Supreme Court Judgment Date](#sci--supreme-court-judgment-date)
   - [Pagination](#pagination)
   - [CSV Export](#csv-export)
-  - [Batch Download from CSV](#batch-download-from-csv)
+  - [Batch Download from Database](#batch-download-from-database)
 - [First-Run Setup](#first-run-setup)
 - [Project Structure](#project-structure)
 - [Captcha Solving](#captcha-solving)
@@ -242,6 +242,7 @@ SCI Judgment Date filters:
   --from DD-MM-YYYY     Start date
   --to DD-MM-YYYY       End date
   --month MM-YYYY       Fetch an entire month
+  --year YYYY           Fetch an entire year
 
 Output options:
   --dump-all            Fetch EVERY judgment (no search term needed)
@@ -407,28 +408,28 @@ This creates `~/myJud/divorce/_results.csv` with columns:
 | **Disposal Nature** | Case outcome | `DISPOSED OFF`, `DISMISSED`, `ALLOWED` |
 | **PDF Path** | Server-side path for download | `court/cnrorders/hcaurdb/orders/HCBM...pdf` |
 
-### Batch Download from CSV
+### Batch Download from Database
 
 A two-step workflow for reliable large-scale downloads:
 
-**Step 1 — Export metadata (fast, no PDFs):**
+**Step 1 — Fetch metadata and store in DB (fast, no PDFs):**
 
 ```bash
-srchigh "divorce" --court bombay --all --csv --no-download
+srchigh "divorce" --court bombay --all --no-download
 ```
-→ Creates `~/myJud/divorce/_results.csv` with up to 12,500 entries
+→ Scrapes case metadata and stores it in the local SQLite database.
 
-**Step 2 — Download PDFs from CSV (with session rotation):**
+**Step 2 — Download PDFs from Database (with session rotation):**
 
 ```bash
-srchigh --from-csv ~/myJud/divorce
+srchigh "divorce" --download-db
 ```
 
-This reads the CSV and downloads each PDF using the stored path. Features:
+This retrieves undownloaded entries from the SQLite database and downloads each PDF. Features:
 - Rotates PHP session every 20 downloads (avoids rate-limiting)
 - Skips already-downloaded files (by CNR)
 - Can be interrupted and resumed — re-running skips existing files
-- Works from any machine — just copy the CSV
+- Optionally specify custom output directory using `--out`
 
 ---
 
@@ -611,11 +612,11 @@ srchigh "divorce" --court bombay --all --csv --no-download
 ### Reliable full download (two-step)
 
 ```bash
-# Step 1: Export (fast)
-srchigh "divorce" --court bombay --all --csv --no-download
+# Step 1: Fetch metadata to DB (fast, optional --csv for spreadsheet use)
+srchigh "divorce" --court bombay --all --no-download
 
-# Step 2: Download (with session rotation, resumable)
-srchigh --from-csv ~/myJud/divorce
+# Step 2: Download PDFs from DB (with session rotation, resumable)
+srchigh "divorce" --download-db
 ```
 
 ### Filter by date range
@@ -676,7 +677,7 @@ The PHP session expired or the CSRF token is invalid. The script auto-recovers b
 ### "PDF download failed"
 
 Temporary PDF URLs expire. The script retries automatically, but if it consistently fails:
-1. Run `--from-csv` again — it skips already-downloaded files
+1. Run `--download-db` again — it skips already-downloaded files
 2. The eCourts server might be temporarily unavailable
 
 ### Permission errors during install
@@ -693,7 +694,7 @@ python3 main.py "divorce" 5
 
 ## Testing
 
-The project has **74 tests** across unit, smoke, and integration layers.
+The project has **71 tests** across unit, smoke, and integration layers.
 
 ### Run all tests (no network needed for most)
 
