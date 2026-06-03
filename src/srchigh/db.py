@@ -141,13 +141,20 @@ async def check_existing_cnrs(cnr_list, search_term="", source="ecourts"):
             return row[0] if row else 0
 
 
-async def mark_downloaded(cnr, file_size, search_term=""):
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("""
+async def mark_downloaded(cnr, file_size, search_term="", conn=None):
+    if conn is not None:
+        await conn.execute("""
             UPDATE judgments SET downloaded = 1, file_size = ?
             WHERE cnr = ? AND search_term = ?
         """, (file_size, cnr, search_term))
-        await db.commit()
+        await conn.commit()
+    else:
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute("""
+                UPDATE judgments SET downloaded = 1, file_size = ?
+                WHERE cnr = ? AND search_term = ?
+            """, (file_size, cnr, search_term))
+            await db.commit()
 
 
 async def get_undownloaded(search_term="", limit=100):
@@ -220,15 +227,24 @@ async def increment_pages_fetched(search_term):
         await db.commit()
 
 
-async def log_download(cnr, pdf_path, search_term, success, file_size=0, session_cnr=""):
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("""
+async def log_download(cnr, pdf_path, search_term, success, file_size=0, session_cnr="", conn=None):
+    if conn is not None:
+        await conn.execute("""
             INSERT INTO download_log
             (cnr, pdf_path, search_term, downloaded_at, success, file_size, session_cnr)
             VALUES (?, ?, ?, ?, ?, ?, ?)
         """, (cnr, pdf_path, search_term, datetime.utcnow().isoformat(),
               1 if success else 0, file_size, session_cnr))
-        await db.commit()
+        await conn.commit()
+    else:
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute("""
+                INSERT INTO download_log
+                (cnr, pdf_path, search_term, downloaded_at, success, file_size, session_cnr)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (cnr, pdf_path, search_term, datetime.utcnow().isoformat(),
+                  1 if success else 0, file_size, session_cnr))
+            await db.commit()
 
 
 

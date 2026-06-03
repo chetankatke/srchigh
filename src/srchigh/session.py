@@ -106,6 +106,39 @@ class ECourtSession:
             enhanced_img = img.resize((img.width * 2, img.height * 2), Image.Resampling.LANCZOS)
             enhanced_img = enhanced_img.filter(ImageFilter.MedianFilter(size=3))
 
+            # Fast path: try a single clear threshold (e.g. 140) first to save external process executions
+            bw_fast = enhanced_img.point(lambda x: 0 if x < 140 else 255)
+            text_fast = pytesseract.image_to_string(
+                bw_fast,
+                config="--psm 8 -c tessedit_char_whitelist="
+                       "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+                       "abcdefghijklmnopqrstuvwxyz0123456789",
+            ).strip()
+            text_fast = re.sub(r"[^a-zA-Z0-9]", "", text_fast)
+            if 4 <= len(text_fast) <= 6:
+                log.debug(f"    [Fast Path] Testing guess \033[1;35m'{text_fast}'\033[0m...")
+                try:
+                    r = await self._post("?p=pdf_search/checkCaptcha", data={
+                        "captcha": text_fast,
+                        "search_text": search_text,
+                        "search_opt": search_opt,
+                        "fcourt_type": court_type or self.fcourt_type,
+                        "ajax_req": "true",
+                        "app_token": self.app_token,
+                    })
+                    j = json.loads(r.text)
+                    if j.get("captcha_status") == "Y":
+                        log.debug(f"      [Fast Path] Testing guess \033[1;35m'{text_fast}'\033[0m ... \033[1;32m✓ ACCEPTED!\033[0m")
+                        self.app_token = j.get("app_token", "")
+                        self.captcha_text = text_fast
+                        log.debug(f"\033[1;32m    ★ Successfully solved (fast path): '{text_fast}'\033[0m")
+                        log.debug("\033[1;36m└──────────────────────────────────────────────────────────────────┘\033[0m")
+                        return text_fast, self.app_token
+                    else:
+                        log.debug(f"      [Fast Path] Testing guess \033[1;35m'{text_fast}'\033[0m ... \033[1;31m✗ Rejected\033[0m. Sweeping all thresholds...")
+                except Exception as e:
+                    log.debug(f"      [Fast Path] Testing guess \033[1;35m'{text_fast}'\033[0m ... \033[1;31mError ({e})\033[0m. Sweeping all thresholds...")
+
             guesses_by_thresh = {}
             guesses = set()
             for thresh in (110, 120, 130, 140, 150, 160, 170):

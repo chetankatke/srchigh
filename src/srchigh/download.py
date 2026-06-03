@@ -32,44 +32,6 @@ async def _run_session(ec, search_term):
         await ec.get_results("_batch", page=0, page_size=5)
 
 
-async def _download_one(sem, ec, entry, out_dir, search_term, stats):
-    async with sem:
-        cnr = entry.get("cnr", "")
-        if not cnr:
-            cnr = entry.get("case_title", "?")[:40].replace("/", "_").replace(" ", "_")
-        pdf_path = entry.get("pdf_path") or entry.get("path", "")
-
-        filename = os.path.join(out_dir, cnr + ".pdf")
-        if os.path.exists(filename) and os.path.getsize(filename) > 1000:
-            async with _stats_lock:
-                stats["skipped"] += 1
-            return True
-
-        log.info("    [%s] %s..." % (search_term[:20], cnr))
-        url = await ec.get_pdf_url(entry)
-        if not url:
-            async with _stats_lock:
-                stats["failed"] += 1
-            return False
-
-        sz = await ec.download_pdf(url, filename)
-        if sz > 1000:
-            await db.mark_downloaded(cnr, sz, search_term)
-            await db.log_download(cnr, pdf_path, search_term, True, sz)
-            async with _stats_lock:
-                stats["downloaded"] += 1
-            return True
-        else:
-            if os.path.exists(filename):
-                try:
-                    os.remove(filename)
-                except OSError:
-                    pass
-            async with _stats_lock:
-                stats["failed"] += 1
-            return False
-
-
 async def download_from_db(search_term="", out_dir=None, max_results=1000, source=None):
     if out_dir is None:
         out_dir = os.path.join(os.path.expanduser("~"), "myJud", search_term or "download")
@@ -97,27 +59,80 @@ async def download_from_db(search_term="", out_dir=None, max_results=1000, sourc
     log.info("  %d to download after skipping existing" % len(filtered))
 
     stats = {"downloaded": 0, "failed": 0, "skipped": 0}
-    sem = asyncio.Semaphore(MAX_CONCURRENT)
 
     ec = ECourtSession(base_url=base_url, fcourt_type=fcourt)
     dl_count = 0
     await _run_session(ec, search_term)
 
-    for idx, entry in enumerate(filtered):
-        if dl_count >= DOWNLOADS_PER_SESSION:
-            log.info("  === Rotating session (%d downloads) ===" % DOWNLOADS_PER_SESSION)
-            await ec.close()
-            ec = ECourtSession(base_url=base_url, fcourt_type=fcourt)
-            await _run_session(ec, search_term)
-            dl_count = 0
+    # Open a single persistent DB connection to reuse across updates
+    import aiosqlite
+    from .db import DB_PATH
+    async with aiosqlite.connect(DB_PATH) as db_conn:
+        chunk_size = MAX_CONCURRENT
+        for i in range(0, len(filtered), chunk_size):
+            chunk = filtered[i:i+chunk_size]
 
-        result = await _download_one(sem, ec, entry, out_dir, search_term, stats)
-        if result:
-            dl_count += 1
+            # Step 1: Fetch PDF URLs sequentially
+            fetch_tasks = []
+            for entry in chunk:
+                # check if session rotation is needed
+                if dl_count >= DOWNLOADS_PER_SESSION:
+                    log.info("  === Rotating session (%d downloads) ===" % DOWNLOADS_PER_SESSION)
+                    await ec.close()
+                    ec = ECourtSession(base_url=base_url, fcourt_type=fcourt)
+                    await _run_session(ec, search_term)
+                    dl_count = 0
 
-        if (idx + 1) % 50 == 0:
-            log.info("    progress: %d/%d (downloaded=%d, failed=%d, skipped=%d)" % (
-                idx + 1, len(filtered), stats["downloaded"], stats["failed"], stats["skipped"]))
+                cnr = entry.get("cnr", "")
+                if not cnr:
+                    cnr = entry.get("case_title", "?")[:40].replace("/", "_").replace(" ", "_")
+                filename = os.path.join(out_dir, cnr + ".pdf")
+
+                # Check if file already exists
+                if os.path.exists(filename) and os.path.getsize(filename) > 1000:
+                    async with _stats_lock:
+                        stats["skipped"] += 1
+                    continue
+
+                log.info("    [%s] Fetching URL for %s..." % (search_term[:20], cnr))
+                url = await ec.get_pdf_url(entry)
+                if not url:
+                    async with _stats_lock:
+                        stats["failed"] += 1
+                    continue
+
+                fetch_tasks.append((entry, url, filename, cnr))
+                dl_count += 1
+
+            if not fetch_tasks:
+                continue
+
+            # Step 2: Download the PDFs concurrently in the current chunk
+            async def download_one_file(entry, url, filename, cnr):
+                sz = await ec.download_pdf(url, filename)
+                if sz > 1000:
+                    pdf_path = entry.get("pdf_path") or entry.get("path", "")
+                    await db.mark_downloaded(cnr, sz, search_term, conn=db_conn)
+                    await db.log_download(cnr, pdf_path, search_term, True, sz, conn=db_conn)
+                    async with _stats_lock:
+                        stats["downloaded"] += 1
+                else:
+                    if os.path.exists(filename):
+                        try:
+                            os.remove(filename)
+                        except OSError:
+                            pass
+                    async with _stats_lock:
+                        stats["failed"] += 1
+
+            tasks = [download_one_file(entry, url, filename, cnr) for entry, url, filename, cnr in fetch_tasks]
+            await asyncio.gather(*tasks)
+
+            # Print progress periodically
+            completed_count = min(i + chunk_size, len(filtered))
+            if completed_count % 50 == 0 or completed_count == len(filtered):
+                log.info("    progress: %d/%d (downloaded=%d, failed=%d, skipped=%d)" % (
+                    completed_count, len(filtered), stats["downloaded"], stats["failed"], stats["skipped"]))
 
     await ec.close()
     log.info("  Downloaded %d PDFs to %s/ (failed=%d)" % (
