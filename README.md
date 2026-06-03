@@ -440,7 +440,7 @@ On the very first execution, srchigh runs a one-time setup:
 ```bash
 ╔══════════════════════════════════════════════════════╗
 ║            srchigh — eCourts Judgments              ║
-║     Indian High Court Judgments Downloader v2.0     ║
+║     Indian High Court Judgments Downloader v2.1     ║
 ╚══════════════════════════════════════════════════════╝
 
   ✓ Output directory: /Users/you/myJud

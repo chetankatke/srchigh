@@ -120,7 +120,7 @@ def check_python():
 WELCOME = r"""
 ╔══════════════════════════════════════════════════════╗
 ║            srchigh — eCourts Judgments              ║
-║     Indian High Court Judgments Downloader v2.0     ║
+║     Indian High Court Judgments Downloader v2.1     ║
 ╚══════════════════════════════════════════════════════╝
 
   First-time setup complete. Configuration saved to:
