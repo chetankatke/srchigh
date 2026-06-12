@@ -201,15 +201,16 @@ def parse_args():
         log.info("    --from DATE             Start date DD-MM-YYYY")
         log.info("    --to DATE               End date DD-MM-YYYY")
         log.info("")
-        log.info("  SCR filters:")
-        log.info("    --citation-year YYYY    Citation year")
-        log.info("    --citation-vol N        Citation volume")
-        log.info("    --citation-supl SUPPL   Citation supplement")
-        log.info("    --citation-page N       Citation page")
-        log.info("    --ncn CODE              Neutral citation number")
-        log.info("    --neu-cit-year YYYY     Neutral citation year")
-        log.info("    --neu-no N              Neutral citation number")
-        log.info("    --sel-lang CODE         Language")
+        log.info("  SCR scope:")
+        log.info("    (default)               Search all volumes / years")
+        log.info("    --citation-year YYYY    Restrict to citation year")
+        log.info("    --citation-vol N        Restrict to citation volume")
+        log.info("    --citation-supl SUPPL   Restrict to citation supplement")
+        log.info("    --citation-page N       Restrict to citation page")
+        log.info("    --ncn CODE              Restrict to neutral citation")
+        log.info("    --neu-cit-year YYYY     Restrict to NCN year")
+        log.info("    --neu-no N              Restrict to NCN number")
+        log.info("    --sel-lang CODE         Restrict to language")
         log.info("")
         log.info("  SCI options:")
         log.info("    --from DATE             Start date DD-MM-YYYY")
@@ -436,7 +437,11 @@ async def run_search():
 
     log.info("")
     log.info("  " + "─" * 45)
-    if not is_scr:
+    if is_scr:
+        any_scr = any(P.get(f) for f in ["citation_year", "citation_vol", "citation_supl", "citation_page", "ncn", "neu_cit_year", "neu_no"])
+        scope = "1 filter set (%s)" % ", ".join(k for k in ["citation_year", "citation_vol", "citation_supl", "citation_page", "ncn", "neu_cit_year", "neu_no"] if P.get(k)) if any_scr else "all volumes / years"
+        log.info("    Scope:           %s" % scope)
+    else:
         if P["court"]:
             scope = "1 High Court (%s)" % P["court"]
         elif P["state"]:
