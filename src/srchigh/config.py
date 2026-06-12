@@ -118,10 +118,10 @@ def check_python():
 # ── First-run welcome ──
 
 WELCOME = r"""
-╔══════════════════════════════════════════════════════════════╗
+╔═══════════════════════════════════════════════════════════════╗
 ║            srchigh — eCourts Judgments                       ║
 ║     Indian High Court Judgments Downloader v2.1              ║
-╚══════════════════════════════════════════════════════════════╝
+╚═══════════════════════════════════════════════════════════════╝
 
   Default behavior: searches ALL 25 High Courts in one API call.
   No client-side fan-out — the eCourts portal handles it.

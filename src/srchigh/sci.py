@@ -13,6 +13,14 @@ from urllib.parse import urljoin
 import httpx
 import ddddocr
 
+_ddddocr_instance = None
+
+def _get_ocr():
+    global _ddddocr_instance
+    if _ddddocr_instance is None:
+        _ddddocr_instance = ddddocr.DdddOcr(show_ad=False)
+    return _ddddocr_instance
+
 from .config import USER_AGENT
 from .parser import parse_entry
 
@@ -135,7 +143,7 @@ class SCISession:
         """
         import random
         ocr_text = ocr_text.strip()
-        m = re.match(r'^(\d+)\s*([+-])\s*(\d+)$', ocr_text)
+        m = re.search(r'(\d+)\s*([+-])\s*(\d+)', ocr_text)
         if m:
             a, op, b = int(m.group(1)), m.group(2), int(m.group(3))
             if op == '+':
@@ -169,7 +177,7 @@ class SCISession:
 
     async def solve_captcha(self, max_tries=30):
         """Download and solve the securimage-wp math captcha using ddddocr."""
-        ocr = ddddocr.DdddOcr(show_ad=False)
+        ocr = _get_ocr()
         for attempt in range(1, max_tries + 1):
             url = CAPTCHA_URL + self.scid
             log.debug(f"\n\033[1;36m┌── Captcha Attempt {attempt}/{max_tries} ──────────────────────────────────────┐\033[0m")
@@ -246,32 +254,29 @@ class SCISession:
 
     def _parse_results_table(self, html):
         """Parse the results HTML table into judgment dicts, extracting PDF URLs."""
+        from parsel import Selector
+        sel = Selector(text=html)
         entries = []
-        for m in re.finditer(
-            r'<tr[^>]*data-diary-no="([^"]+)"[^>]*>(.*?)</tr>',
-            html, re.IGNORECASE | re.DOTALL
-        ):
-            diary_no = m.group(1)
+        rows = sel.css('tr[data-diary-no]')
+        for row in rows:
+            diary_no = row.attrib.get('data-diary-no', '').strip()
             diary_year = diary_no.split("/")[-1] if "/" in diary_no else ""
-            row_html = m.group(2)
-            cells = re.findall(r'<td[^>]*>(.*?)</td>', row_html, re.DOTALL)
-
+            cells = row.css('td')
             entry = {"diary_no": diary_no, "diary_year": diary_year}
 
             # Column mapping from actual HTML:
             # 0=Serial No, 1=Diary Number, 2=Case Number, 3=Petitioner/Respondent,
             # 4=Advocate, 5=Bench, 6=Judgment By, 7=Judgment (has PDF links)
             if len(cells) >= 3:
-                entry["case_no"] = re.sub(r'<[^>]+>', '', cells[2]).strip()
+                entry["case_no"] = "".join(cells[2].css('*::text').getall()).strip()
             if len(cells) >= 4:
-                entry["case_title"] = re.sub(r'<[^>]+>', '', cells[3]).strip()
+                entry["case_title"] = "".join(cells[3].css('*::text').getall()).strip()
             if len(cells) >= 6:
-                entry["judge"] = re.sub(r'<[^>]+>', '', cells[5]).strip()
-            # Extract PDF URL from the Judgment column (last cell)
+                entry["judge"] = "".join(cells[5].css('*::text').getall()).strip()
             if len(cells) >= 8:
-                pdf_m = re.search(r'href="([^"]+\.pdf)"', cells[7])
-                if pdf_m:
-                    entry["pdf_url"] = pdf_m.group(1)
+                pdf_url = cells[7].css('a::attr(href)').get('')
+                if pdf_url and pdf_url.endswith('.pdf'):
+                    entry["pdf_url"] = pdf_url
             entries.append(entry)
         return entries
 

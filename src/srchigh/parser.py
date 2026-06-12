@@ -55,11 +55,13 @@ def parse_entry(html: str) -> dict:
 
     # ── Court ──
     # <span style="opacity:...">Court : NAME</span>
-    court_text = sel.css('span[style*="opacity"]::text').re_first(r'Court\s*:\s*(.+)')
+    court_text = sel.xpath('//span[contains(text(), "Court")]/text()').re_first(r'Court\s*:\s*(.+)')
     if not court_text:
-        court_text = sel.css('span[style*="opacity"]::text').get('')
-        if court_text and "Court :" in court_text:
-            court_text = court_text.split("Court :", 1)[-1].strip()
+        court_text = sel.css('span[style*="opacity"]::text').re_first(r'Court\s*:\s*(.+)')
+        if not court_text:
+            court_text = sel.css('span[style*="opacity"]::text').get('')
+            if court_text and "Court :" in court_text:
+                court_text = court_text.split("Court :", 1)[-1].strip()
     if court_text:
         entry["court"] = court_text.strip()
 
@@ -73,21 +75,31 @@ def parse_entry(html: str) -> dict:
         entry["citation"] = "[%s] %s S.C.R. %s" % (cit_m.group(1), cit_m.group(2), cit_m.group(3))
 
     # ── Date fields ──
-    # All <font color="green"> elements in order: CNR, Reg Date, Decision Date, Disposal Nature
-    greens = sel.css('font[color="green"]::text').getall()
-    # First green font is CNR (already extracted), remaining are dates and disposal
-    labels = sel.css('span[style*="color:#212F3D"]::text').getall()
-    # labels look like: " CNR :", " | Date of registration :", " | Decision Date :", " | Disposal Nature :"
+    # Primary: targeted XPath sibling queries
+    reg_date_val = sel.xpath('//span[contains(text(), "Date of registration")]/following-sibling::font[1]/text()').get()
+    decision_date_val = sel.xpath('//span[contains(text(), "Decision Date")]/following-sibling::font[1]/text()').get()
+    disposal_nature_val = sel.xpath('//span[contains(text(), "Disposal Nature") or contains(text(), "Disposal")]/following-sibling::font[1]/text()').get()
 
-    for label, value in zip(labels, greens):
-        label_clean = label.strip().lstrip("|").strip()
-        value_clean = value.strip()
-        if "Date of registration" in label_clean:
-            entry["reg_date"] = value_clean
-        elif "Decision Date" in label_clean:
-            entry["decision_date"] = value_clean
-        elif "Disposal Nature" in label_clean or "Disposal" in label_clean:
-            entry["disposal_nature"] = value_clean
+    if reg_date_val:
+        entry["reg_date"] = reg_date_val.strip()
+    if decision_date_val:
+        entry["decision_date"] = decision_date_val.strip()
+    if disposal_nature_val:
+        entry["disposal_nature"] = disposal_nature_val.strip()
+
+    # Fallback to list-based zip logic only if primary sibling lookups missed any keys
+    if not reg_date_val or not decision_date_val or not disposal_nature_val:
+        greens = sel.css('font[color="green"]::text').getall()
+        labels = sel.css('span[style*="color:#212F3D"]::text').getall()
+        for label, value in zip(labels, greens):
+            label_clean = label.strip().lstrip("|").strip()
+            value_clean = value.strip()
+            if "Date of registration" in label_clean and "reg_date" not in entry:
+                entry["reg_date"] = value_clean
+            elif "Decision Date" in label_clean and "decision_date" not in entry:
+                entry["decision_date"] = value_clean
+            elif ("Disposal Nature" in label_clean or "Disposal" in label_clean) and "disposal_nature" not in entry:
+                entry["disposal_nature"] = value_clean
 
     return entry
 
