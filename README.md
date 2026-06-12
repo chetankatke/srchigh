@@ -163,10 +163,10 @@ bash install.sh
 ## Quick Start
 
 ```bash
-# Search and download 5 "divorce" judgments (High Courts)
+# Search ALL 25 High Courts in one pass (default behavior)
 srchigh "divorce" 5
 
-# High Court + court filter + download
+# Restrict to a single High Court
 srchigh "divorce" 5 --court bombay
 
 # Supreme Court (SCR) search
@@ -180,13 +180,10 @@ srchigh --sci --month 01-2024
 srchigh --sci --from 01-01-2024 --to 15-01-2024
 
 # Export ALL High Court results as CSV (no PDFs)
-srchigh "divorce" --court bombay --all --csv --no-download
+srchigh "divorce" --all --csv --no-download
 
 # Dump all 38k+ judgments from SCR without a search term
 srchigh --dump-all --scr --all --csv --no-download
-
-# Get help
-srchigh
 ```
 
 **Output** lands in:
@@ -286,20 +283,39 @@ srchigh "divorce custody" 5 --all-words --proximity 20
 
 **Proximity** controls how close the words must be in the judgment text. Values: 20, 40, 60, 80, 100. Lower = closer. Only applies to `--mode ALL`.
 
-### Court Filtering (High Courts)
+### Court Scope (High Courts)
 
-Filter by High Court using the `--court` flag. This uses the server-side numeric state codes discovered by reverse-engineering the court filter sidebar.
+By default, srchigh searches **all 25 High Courts in a single API call**. The eCourts
+portal handles the multi-court fan-out server-side, so a search for `"bail"` returns
+hits from Calcutta, Bombay, Delhi, and every other HC in one paginated result set
+(no need to loop or merge on the client side).
+
+To **restrict** to a single High Court, use `--court`:
 
 ```bash
-srchigh "divorce" 5 --court bombay      # Bombay High Court
-srchigh "divorce" 5 --court delhi       # Delhi High Court
-srchigh "divorce" 5 --court kerala      # Kerala High Court
-srchigh "divorce" 5 --court patna       # Patna High Court (Bihar)
-srchigh "divorce" 5 --court gujarat     # Gujarat High Court
-srchigh "divorce" 5 --court allahabad   # Allahabad High Court
+# Search all 25 HCs (default) — 4M+ matches for common terms
+srchigh "divorce" 5
+
+# Restrict to Bombay High Court
+srchigh "divorce" 5 --court bombay
+
+# Restrict to Delhi High Court
+srchigh "divorce" 5 --court delhi
+
+# Restrict to Kerala High Court
+srchigh "divorce" 5 --court kerala
+
+# Restrict to Patna High Court (Bihar)
+srchigh "divorce" 5 --court patna
+
+# Restrict to Gujarat High Court
+srchigh "divorce" 5 --court gujarat
+
+# Restrict to Allahabad High Court
+srchigh "divorce" 5 --court allahabad
 ```
 
-**Available courts:**
+**Available courts (23 HCs currently supported):**
 
 ```
 allahabad, andhra pradesh, bombay, calcutta, chhattisgarh, delhi,
@@ -309,6 +325,21 @@ punjab & haryana, rajasthan, sikkim, telangana, tripura, uttarakhand
 ```
 
 The matching is case-insensitive and substring-based (`bombay` matches all Bombay benches).
+Use `--state CODE` as a numeric alias for `--court`.
+
+The scope of the current search is printed in the summary block, e.g.:
+
+```
+Scope:           all 25 High Courts
+Total matching:  4,089,865
+```
+
+vs.
+
+```
+Scope:           1 High Court (bombay)
+Total matching:  189,642
+```
 
 ### SCR — Supreme Court Reports
 

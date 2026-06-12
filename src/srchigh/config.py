@@ -118,18 +118,20 @@ def check_python():
 # ── First-run welcome ──
 
 WELCOME = r"""
-╔══════════════════════════════════════════════════════╗
-║            srchigh — eCourts Judgments              ║
-║     Indian High Court Judgments Downloader v2.0     ║
-╚══════════════════════════════════════════════════════╝
+╔══════════════════════════════════════════════════════════════╗
+║            srchigh — eCourts Judgments                       ║
+║     Indian High Court Judgments Downloader v2.1              ║
+╚══════════════════════════════════════════════════════════════╝
 
-  First-time setup complete. Configuration saved to:
-    ~/.config/srchigh/config.json
+  Default behavior: searches ALL 25 High Courts in one API call.
+  No client-side fan-out — the eCourts portal handles it.
 
   Quick start:
-    srchigh "divorce" 5
-    srchigh "divorce" 5 --court bombay
-    srchigh "divorce" --court bombay --all --csv --no-download
+    srchigh "divorce" 5                    # search ALL 25 HCs, top 5
+    srchigh "divorce" 5 --court bombay     # restrict to Bombay HC
+    srchigh "bail NDPS" 10                 # bail + NDPS across all HCs
+    srchigh "divorce" --all --csv --no-download  # all matches, no PDFs
+    srchigh "title" --from 01-01-2024 --to 31-12-2024  # date range
 
   Need help?
     srchigh

@@ -192,9 +192,11 @@ def parse_args():
         log.info("    --bulk-dump             Dump ENTIRE database (organized by year, metadata first)")
         log.info("    --verbose, -v           Enable detailed debug output")
         log.info("")
-        log.info("  High Court filters:")
-        log.info("    --court NAME            Filter by High Court (%s)" % court_list)
-        log.info("    --state CODE            Filter by state code")
+        log.info("  Court scope:")
+        log.info("    (default)               Search ALL 25 High Courts in one pass")
+        log.info("    --court NAME            Restrict to a single High Court")
+        log.info("                           Available: %s" % court_list)
+        log.info("    --state CODE            Alias for --court (state code)")
         log.info("    --judge NAME            Filter by judge name")
         log.info("    --from DATE             Start date DD-MM-YYYY")
         log.info("    --to DATE               End date DD-MM-YYYY")
@@ -434,6 +436,14 @@ async def run_search():
 
     log.info("")
     log.info("  " + "─" * 45)
+    if not is_scr:
+        if P["court"]:
+            scope = "1 High Court (%s)" % P["court"]
+        elif P["state"]:
+            scope = "1 state (code %s)" % P["state"]
+        else:
+            scope = "all 25 High Courts"
+        log.info("    Scope:           %s" % scope)
     log.info("    Total matching:  %s" % ("{:,}".format(total) if total else "?"))
     log.info("    Page size:       %d per page" % page_size)
     log.info("    Total pages:     %d" % total_pages)
