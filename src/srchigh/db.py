@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS judgments (
     downloaded      INTEGER DEFAULT 0,
     file_size       INTEGER DEFAULT 0,
     created_at      TEXT,
+    val             TEXT DEFAULT '0',  -- search result ID for PDF URL fetch
     UNIQUE(cnr, search_term)
 )
 """
@@ -66,6 +67,11 @@ async def init_db():
             await db.execute("ALTER TABLE judgments ADD COLUMN source TEXT DEFAULT 'ecourts'")
         except aiosqlite.OperationalError:
             pass  # column already exists
+        # Migration: add val column if missing (existing DBs)
+        try:
+            await db.execute("ALTER TABLE judgments ADD COLUMN val TEXT DEFAULT '0'")
+        except aiosqlite.OperationalError:
+            pass  # column already exists
         try:
             await db.execute("ALTER TABLE searches ADD COLUMN source TEXT DEFAULT 'ecourts'")
         except aiosqlite.OperationalError:
@@ -78,8 +84,8 @@ async def insert_judgment(entry, search_term="", downloaded=False, file_size=0, 
         await db.execute("""
             INSERT OR REPLACE INTO judgments
             (cnr, case_title, court, judge, reg_date, decision_date,
-             disposal_nature, pdf_path, search_term, source, downloaded, file_size, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             disposal_nature, pdf_path, search_term, source, downloaded, file_size, created_at, val)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             entry.get("cnr"),
             entry.get("case_title"),
@@ -94,6 +100,7 @@ async def insert_judgment(entry, search_term="", downloaded=False, file_size=0, 
             1 if downloaded else 0,
             file_size,
             datetime.utcnow().isoformat(),
+            entry.get("val", "0"),
         ))
         await db.commit()
 
@@ -116,6 +123,7 @@ async def insert_judgments_batch(entries, search_term="", source="ecourts"):
             0,
             0,
             datetime.utcnow().isoformat(),
+            e.get("val", "0"),
         )
         for e in entries
     ]
@@ -123,8 +131,8 @@ async def insert_judgments_batch(entries, search_term="", source="ecourts"):
         await db.executemany("""
             INSERT OR IGNORE INTO judgments
             (cnr, case_title, court, judge, reg_date, decision_date,
-             disposal_nature, pdf_path, search_term, source, downloaded, file_size, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             disposal_nature, pdf_path, search_term, source, downloaded, file_size, created_at, val)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, rows)
         await db.commit()
 

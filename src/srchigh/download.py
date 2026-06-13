@@ -22,14 +22,14 @@ async def _run_session(ec, search_term):
     await ec.client.get(ec.base_url)
     ct, tk = await ec.solve_captcha(search_text=search_term)
     r = await ec.client.get(
-        ec.base_url + "?p=pdf_search/home&text=_batch&captcha=" + ct +
+        ec.base_url + "?p=pdf_search/home&text=" + search_term + "&captcha=" + ct +
         "&search_opt=PHRASE&fcourt_type=%s&app_token=" % ec.fcourt_type + tk,
     )
-    m = re.search(r'app_token=([^"&\s<>]+)', r.text)
+    m = re.search(r'app_token=([^\"&\\s<>]+)', r.text)
     if m:
         ec.app_token = m.group(1)
     for _ in range(3):
-        await ec.get_results("_batch", page=0, page_size=5)
+        await ec.get_results(search_term, page=0, page_size=5)
 
 
 async def download_from_db(search_term="", out_dir=None, max_results=1000, source=None):
