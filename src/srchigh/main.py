@@ -47,7 +47,7 @@ def parse_args():
         "from_date": "", "to_date": "", "out": "",
         "court": "", "all": False, "no_dl": False, "dump_all": False,
         "download_db": False, "status": False, "export_csv": "", "csv": False,
-        "scr": False,
+        "stats": False, "scr": False,
         "citation_year": "", "citation_vol": "", "citation_supl": "",
         "citation_page": "", "ncn": "", "neu_cit_year": "",
         "neu_no": "", "sel_lang": "",
@@ -139,6 +139,8 @@ def parse_args():
             p["status"] = True; i += 1
         elif a == "--csv":
             p["csv"] = True; i += 1
+        elif a == "--stats":
+            p["stats"] = True; i += 1
         elif a == "--export-csv" and i + 1 < len(args):
             p["export_csv"] = args[i + 1]; i += 2
         elif a == "--out" and i + 1 < len(args):
@@ -170,7 +172,7 @@ def parse_args():
         p["no_dl"] = True  # Default to metadata only for bulk dump unless overridden
         # We can let the user override with a future flag, but safety first.
 
-    if not p["search"] and not p.get("dump_all") and not p.get("bulk_dump") and not p["download_db"] and not p["status"] and not p.get("export_csv") and not p.get("sci") and not p.get("clear_db"):
+    if not p["search"] and not p.get("dump_all") and not p.get("bulk_dump") and not p["download_db"] and not p["status"] and not p.get("export_csv") and not p.get("stats") and not p.get("sci") and not p.get("clear_db"):
         court_list = ", ".join(sorted(COURT_NAMES.keys()))
         log.info("Usage: python3 main.py <search_term> [count] [options]")
         log.info("")
@@ -224,6 +226,7 @@ def parse_args():
         log.info("    --no-download           Skip PDF download, store in DB only")
         log.info("    --csv                   Export search results directly to CSV")
         log.info("    --download-db           Download pending PDFs from DB")
+        log.info("    --stats                 Show per-court breakdown of results (no download)")
         log.info("    --status                Show DB status for a search term")
         log.info("    --clear-db              Clear the local SQLite database")
         log.info("    --export-csv PATH       Export DB results to CSV")
@@ -416,11 +419,34 @@ async def run_search():
         await ec.get_results(P["search"], page=0, page_size=page_size, mode=P["mode"],
                              state_code=P["state"], proximity=P["proximity"],
                              **scr_params)
-    test_entries, total = await ec.get_results(
+    test_entries, total, facets = await ec.get_results_with_facets(
         P["search"], page=0, page_size=page_size, mode=P["mode"],
         state_code=P["state"], proximity=P["proximity"],
         **scr_params,
     )
+
+    # If --stats flag is set, print stats and exit (no PDF download).
+    if P.get("stats"):
+        log.info("")
+        log.info("  " + "─" * 50)
+        log.info("  STATS for '%s' (all 25 High Courts, no downloads)" % P["search"])
+        log.info("  " + "─" * 50)
+        log.info("    Total judgments:    %s" % "{:,}".format(total))
+        log.info("")
+        if facets.get("courts"):
+            log.info("    Per-court breakdown (%d HCs with cases):" % len(facets["courts"]))
+            log.info("")
+            for i, (name, code, count) in enumerate(facets["courts"], 1):
+                bar = "█" * min(40, int(40 * count / max(c for _, _, c in facets["courts"])))
+                log.info("    %2d. %-38s [%2s] %6s  %s" % (
+                    i, name, code, "{:,}".format(count), bar))
+        if facets.get("years"):
+            log.info("")
+            log.info("    Per-year breakdown:")
+            for year, count in facets["years"][:10]:
+                log.info("      %s: %s" % (year, "{:,}".format(count)))
+        await ec.close()
+        return
 
     pages_to_fetch = []
     total_pages = 0

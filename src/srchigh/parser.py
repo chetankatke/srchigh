@@ -116,6 +116,88 @@ def parse_results_page(json_response: dict) -> Tuple[list, int]:
     return entries, total
 
 
+def parse_facets(json_response: dict) -> dict:
+    """Parse per-court and per-year facet counts from the search response.
+
+    The eCourts portal embeds HTML facet widgets in the response under
+    ``court_dtls`` and ``year_dtls`` (and ``judge_dtls``). These let us
+    answer "which High Court has the most X cases?" without round-tripping
+    one request per court.
+
+    Returns a dict with keys:
+        - ``courts``: [(name, state_code, count), ...] sorted by count desc
+        - ``years``:  [(year, count), ...] sorted by year desc
+        - ``judges``: [(name, count), ...] sorted by count desc
+    Each list is empty if the corresponding ``*_dtls`` field is missing.
+    """
+    out = {"courts": [], "years": [], "judges": []}
+
+    def _parse_list_html(html: str):
+        """Extract (label, code_or_empty, count) tuples from a facet <ul>."""
+        if not html:
+            return []
+        # Court items embed a JS call: get_details('','','CODE','NAME')
+        # Then a <span class='badge rounded-pill text-bg-light'>COUNT</span>
+        # appears BEFORE </a> (the </a> closes the <li>).
+        items = []
+        # Match: get_details(...,'CODE','NAME');">LABEL<span class='badge...'>COUNT</span>
+        for m in re.finditer(
+            r"""get_details\('[^']*','[^']*','([^']*)','([^']+)'\);"\>\s*([^<]+?)\s*<span class='badge[^>]*>\s*([0-9,]+)\s*</span>""",
+            html, re.DOTALL,
+        ):
+            code, name, _label, count = m.group(1), m.group(2), m.group(3), m.group(4)
+            try:
+                count = int(re.sub(r"[^\d]", "", count) or "0")
+            except ValueError:
+                count = 0
+            items.append((name.strip(), code, count))
+        return items
+
+    courts_html = json_response.get("court_dtls", "")
+    if isinstance(courts_html, str) and courts_html:
+        # Modal "More" pane duplicates the first 5; dedupe by (name, code).
+        seen = set()
+        for name, code, count in _parse_list_html(courts_html):
+            key = (name, code)
+            if key in seen:
+                continue
+            seen.add(key)
+            out["courts"].append((name, code, count))
+        out["courts"].sort(key=lambda x: -x[2])
+
+    judges_html = json_response.get("judge_dtls", "")
+    if isinstance(judges_html, str) and judges_html:
+        for m in re.finditer(
+            r"judge_name='\s*\+?\s*'([^']+)'.*?text-bg-light'\s*>([^<]+)</span>",
+            judges_html, re.DOTALL,
+        ):
+            name, count = m.group(1), m.group(2)
+            try:
+                count = int(re.sub(r"[^\d]", "", count) or "0")
+            except ValueError:
+                count = 0
+            out["judges"].append((name.strip(), count))
+        out["judges"].sort(key=lambda x: -x[1])
+
+    years_html = json_response.get("year_dtls", "")
+    if isinstance(years_html, str) and years_html:
+        # Year facet format: <a ... >YEAR</a><span ...>COUNT</span>
+        for m in re.finditer(
+            r"href=\"javascript:get_details\('([^']+)'[^>]*>[^<]*</a>\s*"
+            r"<span class='badge[^>]*>\s*([^<]+)\s*</span>",
+            years_html, re.DOTALL,
+        ):
+            year, count = m.group(1), m.group(2)
+            try:
+                count = int(re.sub(r"[^\d]", "", count) or "0")
+            except ValueError:
+                count = 0
+            out["years"].append((year.strip(), count))
+        out["years"].sort(key=lambda x: -x[0])
+
+    return out
+
+
 def get_court_code(court_name: str) -> str:
     """Look up numeric state_code from a court name substring."""
     from .config import COURT_NAMES

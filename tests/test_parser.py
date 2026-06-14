@@ -220,3 +220,78 @@ class TestMakeSafeFilename:
     def test_whitespace_in_cnr_replaced(self):
         from srchigh.parser import make_safe_filename
         assert make_safe_filename("ABC 123 2024", "p.pdf") == "ABC_123_2024"
+
+
+class TestParseFacets:
+    """parse_facets — extract per-court/year/judge counts from search response."""
+
+    def test_courts_extracted(self):
+        from srchigh.parser import parse_facets
+        html = (
+            "<ul><li><a href=\"javascript:get_details('','','9','Allahabad High Court');\">"
+            "Allahabad High Court&nbsp;"
+            "<span class='badge rounded-pill text-bg-light'>2008</span></a></li>"
+            "<li><a href=\"javascript:get_details('','','10','Patna High Court');\">"
+            "Patna High Court&nbsp;"
+            "<span class='badge rounded-pill text-bg-light'>891</span></a></li></ul>"
+        )
+        result = parse_facets({"court_dtls": html})
+        assert len(result["courts"]) == 2
+        assert result["courts"][0] == ("Allahabad High Court", "9", 2008)
+        assert result["courts"][1] == ("Patna High Court", "10", 891)
+
+    def test_courts_sorted_descending(self):
+        from srchigh.parser import parse_facets
+        html = (
+            "<ul><li><a href=\"javascript:get_details('','','1','A');\">A&nbsp;"
+            "<span class='badge rounded-pill text-bg-light'>10</span></a></li>"
+            "<li><a href=\"javascript:get_details('','','2','B');\">B&nbsp;"
+            "<span class='badge rounded-pill text-bg-light'>100</span></a></li>"
+            "<li><a href=\"javascript:get_details('','','3','C');\">C&nbsp;"
+            "<span class='badge rounded-pill text-bg-light'>50</span></a></li></ul>"
+        )
+        result = parse_facets({"court_dtls": html})
+        names = [c[0] for c in result["courts"]]
+        assert names == ["B", "C", "A"]
+
+    def test_dedup_modal_pane(self):
+        from srchigh.parser import parse_facets
+        html = (
+            "<ul><li><a href=\"javascript:get_details('','','9','Allahabad');\">"
+            "Allahabad&nbsp;<span class='badge rounded-pill text-bg-light'>2008</span></a></li></ul>"
+            "<div class='modal-body'><ul><li>"
+            "<a href=\"javascript:get_details('','','9','Allahabad');\">"
+            "Allahabad&nbsp;<span class='badge rounded-pill text-bg-light'>2008</span></a></li></ul></div>"
+        )
+        result = parse_facets({"court_dtls": html})
+        assert len(result["courts"]) == 1
+        assert result["courts"][0] == ("Allahabad", "9", 2008)
+
+    def test_empty_court_dtls(self):
+        from srchigh.parser import parse_facets
+        result = parse_facets({"court_dtls": ""})
+        assert result["courts"] == []
+
+    def test_missing_court_dtls(self):
+        from srchigh.parser import parse_facets
+        result = parse_facets({})
+        assert result["courts"] == []
+
+    def test_handles_thousands_separator_in_count(self):
+        from srchigh.parser import parse_facets
+        html = (
+            "<ul><li><a href=\"javascript:get_details('','','9','X');\">X&nbsp;"
+            "<span class='badge rounded-pill text-bg-light'>1,234</span></a></li></ul>"
+        )
+        result = parse_facets({"court_dtls": html})
+        assert result["courts"][0][2] == 1234
+
+    def test_returns_dict_with_all_keys(self):
+        from srchigh.parser import parse_facets
+        result = parse_facets({})
+        assert "courts" in result
+        assert "years" in result
+        assert "judges" in result
+        assert result["courts"] == []
+        assert result["years"] == []
+        assert result["judges"] == []

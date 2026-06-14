@@ -258,6 +258,56 @@ class ECourtSession:
         entries, total = parse_results_page(j)
         return entries, total
 
+    async def get_results_with_facets(self, search_term, page=0, page_size=25,
+                                       mode="PHRASE", state_code="",
+                                       judge_name="", from_date="", to_date="",
+                                       proximity="", **extra_params):
+        """Like get_results, but also returns the per-court/year/judge facets.
+
+        Returns (entries, total, facets) where ``facets`` is a dict produced
+        by :func:`parser.parse_facets`.
+        """
+        fields = [
+            "state_code", "dist_code", "judge_name", "judge_arr",
+            "act_txt", "section_txt", "case_no", "case_year", "pet_res",
+            "from_date", "to_date", "disp_nature", "fulltext_case_type",
+            "sel_lang", "citation_yr", "citation_vol", "citation_supl",
+            "citation_page", "citation_keyword", "neu_cit_year", "neu_no",
+            "case_no1", "case_year1", "pet_res1", "fulltext_case_type1",
+        ]
+        dt = {k: "" for k in fields}
+        dt.update({
+            "search_txt": "",
+            "search_txt1": search_term,
+            "search_opt": mode,
+            "fcourt_type": self.fcourt_type,
+            "state_code": state_code,
+            "judge_name": judge_name,
+            "from_date": from_date,
+            "to_date": to_date,
+            "proximity": proximity,
+            "iDisplayStart": str(page * page_size),
+            "iDisplayLength": str(page_size),
+            "sEcho": "1",
+            "flag": "",
+            "ajax_req": "true",
+            "app_token": self.app_token,
+        })
+        dt.update(extra_params)
+        r = await self._post("?p=pdf_search/home", data=dt)
+        if r.status_code != 200:
+            return [], 0, {"courts": [], "years": [], "judges": []}
+        try:
+            j = json.loads(r.text)
+        except json.JSONDecodeError:
+            return [], 0, {"courts": [], "years": [], "judges": []}
+        if j.get("app_token"):
+            self.app_token = j["app_token"]
+        from .parser import parse_facets
+        entries, total = parse_results_page(j)
+        facets = parse_facets(j)
+        return entries, total, facets
+
     async def get_pdf_url(self, entry):
         path = entry.get("path", "")
         val = entry.get("val", "0")
